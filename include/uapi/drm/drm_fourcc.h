@@ -37,6 +37,9 @@
 /* 8 bpp Red */
 #define DRM_FORMAT_R8		fourcc_code('R', '8', ' ', ' ') /* [7:0] R */
 
+/* 10 bpp Red */
+#define DRM_FORMAT_R10		fourcc_code('R', '1', '0', ' ') /* [9:0] R */
+
 /* 16 bpp RG */
 #define DRM_FORMAT_RG88		fourcc_code('R', 'G', '8', '8') /* [15:0] R:G 8:8 little endian */
 #define DRM_FORMAT_GR88		fourcc_code('G', 'R', '8', '8') /* [15:0] G:R 8:8 little endian */
@@ -100,7 +103,10 @@
 #define DRM_FORMAT_UYVY		fourcc_code('U', 'Y', 'V', 'Y') /* [31:0] Y1:Cr0:Y0:Cb0 8:8:8:8 little endian */
 #define DRM_FORMAT_VYUY		fourcc_code('V', 'Y', 'U', 'Y') /* [31:0] Y1:Cb0:Y0:Cr0 8:8:8:8 little endian */
 
-#define DRM_FORMAT_AYUV		fourcc_code('A', 'Y', 'U', 'V') /* [31:0] A:Y:Cb:Cr 8:8:8:8 little endian */
+/* [31:0] A:Y:Cb:Cr 8:8:8:8 little endian */
+#define DRM_FORMAT_AYUV		fourcc_code('A', 'Y', 'U', 'V')
+/* [31:0] A:Y:Cb:Cr 2:10:10:10 little endian */
+#define DRM_FORMAT_AYUV2101010	fourcc_code('A', 'Y', '3', '0')
 
 /*
  * 2 plane YCbCr
@@ -110,6 +116,8 @@
  * index 1 = Cb:Cr plane, [15:0] Cb:Cr little endian
  */
 #define DRM_FORMAT_NV12		fourcc_code('N', 'V', '1', '2') /* 2x2 subsampled Cr:Cb plane */
+/* 2x2 subsampled Cr:Cb plane 10 BIT */
+#define DRM_FORMAT_NV12_10BIT	fourcc_code('N', 'V', '1', '0')
 #define DRM_FORMAT_NV21		fourcc_code('N', 'V', '2', '1') /* 2x2 subsampled Cb:Cr plane */
 #define DRM_FORMAT_NV16		fourcc_code('N', 'V', '1', '6') /* 2x1 subsampled Cr:Cb plane */
 #define DRM_FORMAT_NV61		fourcc_code('N', 'V', '6', '1') /* 2x1 subsampled Cb:Cr plane */

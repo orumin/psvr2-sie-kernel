@@ -38,6 +38,7 @@
 #define CHIP_ERASE_2MB_READY_WAIT_JIFFIES	(40UL * HZ)
 
 #define SPI_NOR_MAX_ID_LEN	6
+#define SPI_NOR_MAX_ADDR_WIDTH	4
 
 struct flash_info {
 	char		*name;
@@ -68,6 +69,9 @@ struct flash_info {
 #define	SPI_NOR_DUAL_READ	0x20    /* Flash supports Dual Read */
 #define	SPI_NOR_QUAD_READ	0x40    /* Flash supports Quad Read */
 #define	USE_FSR			0x80	/* use flag status register */
+#define	NO_SUPPORT_DOR_QOR	0x100	/* do not support 112 and 114 */
+#define	USE_CUSTOMIZED_DUMMY	0x200	/* customized dummy cycle */
+#define	USE_SPI_NOR_TWO_DIE	0x400	/* support 2 die flash */
 };
 
 #define JEDEC_MFR(info)	((info)->id[0])
@@ -312,6 +316,81 @@ static void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops)
 	mutex_unlock(&nor->lock);
 }
 
+static int winbond_die_select_enable(struct spi_nor *nor, u8 die)
+{
+	int ret = 0;
+
+	nor->cmd_buf[0] = die;
+
+	/* Wait here to ensure write reg or program is done */
+	ret = spi_nor_wait_till_ready(nor);
+	if (ret)
+		return ret;
+
+	ret = nor->write_reg(nor, SPINOR_OP_SEL_DIE, nor->cmd_buf, 1);
+	if (ret)
+		return ret;
+
+	return ret;
+}
+
+static int winbond_die_select(struct spi_nor *nor, u32 *addr)
+{
+	int ret = 0;
+	static u8 active_id;
+
+	if (!(nor->flags & SNOR_F_TWO_DIE))
+		return ret;
+
+	/* assume that there is no more than 2 dies */
+	if (*addr >= (nor->mtd.size >> 1)) {
+		if (active_id == 0) {
+			ret = winbond_die_select_enable(nor, 0x1);
+			if (ret)
+				return ret;
+
+			active_id = 1;
+		}
+		*addr -= nor->mtd.size >> 1;
+	} else {
+		/* physical address locate at die0, and active die is die1
+		 * then switch to die0
+		 */
+		if (active_id == 1) {
+			ret = winbond_die_select_enable(nor, 0x0);
+			if (ret)
+				return ret;
+
+			active_id = 0;
+		 }
+	}
+
+	return ret;
+}
+
+/*
+ * Initiate the erasure of a single sector
+ */
+static int spi_nor_erase_sector(struct spi_nor *nor, u32 addr)
+{
+	u8 buf[SPI_NOR_MAX_ADDR_WIDTH];
+	int i;
+
+	if (nor->erase)
+		return nor->erase(nor, addr);
+
+	/*
+	 * Default implementation, if driver doesn't have a specialized HW
+	 * control
+	 */
+	for (i = nor->addr_width - 1; i >= 0; i--) {
+		buf[i] = addr & 0xff;
+		addr >>= 8;
+	}
+
+	return nor->write_reg(nor, nor->erase_opcode, buf, nor->addr_width);
+}
+
 /*
  * Erase an address range on the nor chip.  The address range may extend
  * one or more erase sectors.  Return an error is there is a problem erasing.
@@ -368,13 +447,17 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 	/* "sector"-at-a-time erase */
 	} else {
+		/* assume that erase does not cross different die */
+		ret = winbond_die_select(nor, &addr);
+		if (ret)
+			goto erase_err;
+
 		while (len) {
 			write_enable(nor);
 
-			if (nor->erase(nor, addr)) {
-				ret = -EIO;
+			ret = spi_nor_erase_sector(nor, addr);
+			if (ret)
 				goto erase_err;
-			}
 
 			addr += mtd->erasesize;
 			len -= mtd->erasesize;
@@ -721,6 +804,8 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "mx25u6435f",  INFO(0xc22537, 0, 64 * 1024, 128, SECT_4K) },
 	{ "mx25l12805d", INFO(0xc22018, 0, 64 * 1024, 256, 0) },
 	{ "mx25l12855e", INFO(0xc22618, 0, 64 * 1024, 256, 0) },
+	{ "mx25u25645g", INFO(0xc22539, 0, 64 * 1024, 512, SECT_4K | SPI_NOR_QUAD_READ) },
+	{ "mx25u51245g", INFO(0xc2253a, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_QUAD_READ) },
 	{ "mx25l25635e", INFO(0xc22019, 0, 64 * 1024, 512, 0) },
 	{ "mx25l25655e", INFO(0xc22619, 0, 64 * 1024, 512, 0) },
 	{ "mx66l51235l", INFO(0xc2201a, 0, 64 * 1024, 1024, SPI_NOR_QUAD_READ) },
@@ -749,8 +834,8 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "s25sl032p",  INFO(0x010215, 0x4d00,  64 * 1024,  64, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "s25sl064p",  INFO(0x010216, 0x4d00,  64 * 1024, 128, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "s25fl256s0", INFO(0x010219, 0x4d00, 256 * 1024, 128, 0) },
-	{ "s25fl256s1", INFO(0x010219, 0x4d01,  64 * 1024, 512, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
-	{ "s25fl512s",  INFO(0x010220, 0x4d00, 256 * 1024, 256, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "s25fl256s1", INFO(0x010219, 0x4d01,  64 * 1024, 512, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | NO_SUPPORT_DOR_QOR | USE_CUSTOMIZED_DUMMY) },
+	{ "s25fl512s",  INFO(0x010220, 0x4d00, 256 * 1024, 256, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | NO_SUPPORT_DOR_QOR | USE_CUSTOMIZED_DUMMY) },
 	{ "s70fl01gs",  INFO(0x010221, 0x4d00, 256 * 1024, 256, 0) },
 	{ "s25sl12800", INFO(0x012018, 0x0300, 256 * 1024,  64, 0) },
 	{ "s25sl12801", INFO(0x012018, 0x0301,  64 * 1024, 256, 0) },
@@ -834,6 +919,8 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "w25q64", INFO(0xef4017, 0, 64 * 1024, 128, SECT_4K) },
 	{ "w25q64dw", INFO(0xef6017, 0, 64 * 1024, 128, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "w25q128fw", INFO(0xef6018, 0, 64 * 1024, 256, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "w25q256jw", INFO(0xef6019, 0, 64 * 1024, 512, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
+	{ "w25q512jw", INFO(0xef6119, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | USE_SPI_NOR_TWO_DIE) },
 	{ "w25q80", INFO(0xef5014, 0, 64 * 1024,  16, SECT_4K) },
 	{ "w25q80bl", INFO(0xef4014, 0, 64 * 1024,  16, SECT_4K) },
 	{ "w25q128", INFO(0xef4018, 0, 64 * 1024, 256, SECT_4K) },
@@ -877,14 +964,19 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
 	int ret;
+	u32 addr = (u32)from;
 
-	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", (u32)from, len);
+	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", addr, len);
 
 	ret = spi_nor_lock_and_prep(nor, SPI_NOR_OPS_READ);
 	if (ret)
 		return ret;
 
-	ret = nor->read(nor, from, len, retlen, buf);
+	ret = winbond_die_select(nor, &addr);
+	if (ret)
+		return ret;
+
+	ret = nor->read(nor, addr, len, retlen, buf);
 
 	spi_nor_unlock_and_unprep(nor, SPI_NOR_OPS_READ);
 	return ret;
@@ -967,24 +1059,29 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
 	u32 page_offset, page_size, i;
 	int ret;
+	u32 addr = (u32)to;
 
-	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
+	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", addr, len);
 
 	ret = spi_nor_lock_and_prep(nor, SPI_NOR_OPS_WRITE);
 	if (ret)
 		return ret;
 
+	ret = winbond_die_select(nor, &addr);
+	if (ret)
+		return ret;
+
 	write_enable(nor);
 
-	page_offset = to & (nor->page_size - 1);
+	page_offset = addr & (nor->page_size - 1);
 
 	/* do all the bytes fit onto one page? */
 	if (page_offset + len <= nor->page_size) {
-		nor->write(nor, to, len, retlen, buf);
+		nor->write(nor, addr, len, retlen, buf);
 	} else {
 		/* the size of data remaining on the first page */
 		page_size = nor->page_size - page_offset;
-		nor->write(nor, to, page_size, retlen, buf);
+		nor->write(nor, addr, page_size, retlen, buf);
 
 		/* write everything in nor->page_size chunks */
 		for (i = page_size; i < len; i += page_size) {
@@ -998,7 +1095,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 
 			write_enable(nor);
 
-			nor->write(nor, to + i, page_size, retlen, buf + i);
+			nor->write(nor, addr + i, page_size, retlen, buf + i);
 		}
 	}
 
@@ -1057,13 +1154,6 @@ static int spansion_quad_enable(struct spi_nor *nor)
 		return -EINVAL;
 	}
 
-	ret = spi_nor_wait_till_ready(nor);
-	if (ret) {
-		dev_err(nor->dev,
-			"timeout while writing configuration register\n");
-		return ret;
-	}
-
 	/* read back and check it */
 	ret = read_cr(nor);
 	if (!(ret > 0 && (ret & CR_QUAD_EN_SPAN))) {
@@ -1101,7 +1191,7 @@ static int set_quad_mode(struct spi_nor *nor, const struct flash_info *info)
 static int spi_nor_check(struct spi_nor *nor)
 {
 	if (!nor->dev || !nor->read || !nor->write ||
-		!nor->read_reg || !nor->write_reg || !nor->erase) {
+		!nor->read_reg || !nor->write_reg) {
 		pr_err("spi-nor: please fill all the necessary fields!\n");
 		return -EINVAL;
 	}
@@ -1200,6 +1290,9 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 	if (info->flags & USE_FSR)
 		nor->flags |= SNOR_F_USE_FSR;
 
+	if (info->flags & USE_SPI_NOR_TWO_DIE)
+		nor->flags |= SNOR_F_TWO_DIE;
+
 #ifdef CONFIG_MTD_SPI_NOR_USE_4K_SECTORS
 	/* prefer "small sector" erase if possible */
 	if (info->flags & SECT_4K) {
@@ -1253,9 +1346,17 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 	switch (nor->flash_read) {
 	case SPI_NOR_QUAD:
 		nor->read_opcode = SPINOR_OP_READ_1_1_4;
+		if (info->flags & NO_SUPPORT_DOR_QOR)
+			nor->read_opcode = SPINOR_OP_READ_1_4_4;
+		if (info->flags & USE_CUSTOMIZED_DUMMY)
+			nor->read_dummy = 10;
 		break;
 	case SPI_NOR_DUAL:
 		nor->read_opcode = SPINOR_OP_READ_1_1_2;
+		if (info->flags & NO_SUPPORT_DOR_QOR)
+			nor->read_opcode = SPINOR_OP_READ_1_2_2;
+		if (info->flags & USE_CUSTOMIZED_DUMMY)
+			nor->read_dummy = 12;
 		break;
 	case SPI_NOR_FAST:
 		nor->read_opcode = SPINOR_OP_READ_FAST;
@@ -1280,9 +1381,23 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 			switch (nor->flash_read) {
 			case SPI_NOR_QUAD:
 				nor->read_opcode = SPINOR_OP_READ4_1_1_4;
+				if (info->flags & NO_SUPPORT_DOR_QOR) {
+					nor->read_opcode = SPINOR_OP_READ_1_4_4;
+					set_4byte(nor, info, 1);
+				}
+				if (info->flags & USE_CUSTOMIZED_DUMMY)
+					nor->read_dummy = 10;
+
 				break;
 			case SPI_NOR_DUAL:
 				nor->read_opcode = SPINOR_OP_READ4_1_1_2;
+				if (info->flags & NO_SUPPORT_DOR_QOR) {
+					nor->read_opcode = SPINOR_OP_READ_1_2_2;
+					set_4byte(nor, info, 1);
+				}
+				if (info->flags & USE_CUSTOMIZED_DUMMY)
+					nor->read_dummy = 12;
+
 				break;
 			case SPI_NOR_FAST:
 				nor->read_opcode = SPINOR_OP_READ4_FAST;
@@ -1301,7 +1416,16 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 		nor->addr_width = 3;
 	}
 
-	nor->read_dummy = spi_nor_read_dummy_cycles(nor);
+	if (nor->addr_width > SPI_NOR_MAX_ADDR_WIDTH) {
+		dev_err(dev, "address width is too large: %u\n",
+			nor->addr_width);
+		return -EINVAL;
+	}
+
+	if (info->flags & USE_CUSTOMIZED_DUMMY)
+		nor->flags |= SNOR_F_USE_DUMMY;
+	else
+		nor->read_dummy = spi_nor_read_dummy_cycles(nor);
 
 	dev_info(dev, "%s (%lld Kbytes)\n", info->name,
 			(long long)mtd->size >> 10);

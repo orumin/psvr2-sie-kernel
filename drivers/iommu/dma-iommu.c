@@ -166,7 +166,7 @@ static struct iova *__alloc_iova(struct iova_domain *iovad, size_t size,
 }
 
 /* The IOVA allocator knows what we mapped, so just unmap whatever that was */
-static void __iommu_dma_unmap(struct iommu_domain *domain, dma_addr_t dma_addr)
+void __iommu_dma_unmap(struct iommu_domain *domain, dma_addr_t dma_addr)
 {
 	struct iova_domain *iovad = domain->iova_cookie;
 	unsigned long shift = iova_shift(iovad);
@@ -184,14 +184,14 @@ static void __iommu_dma_unmap(struct iommu_domain *domain, dma_addr_t dma_addr)
 	__free_iova(iovad, iova);
 }
 
-static void __iommu_dma_free_pages(struct page **pages, int count)
+void __iommu_dma_free_pages(struct page **pages, int count)
 {
 	while (count--)
 		__free_page(pages[count]);
 	kvfree(pages);
 }
 
-static struct page **__iommu_dma_alloc_pages(unsigned int count, gfp_t gfp)
+struct page **__iommu_dma_alloc_pages(unsigned int count, gfp_t gfp)
 {
 	struct page **pages;
 	unsigned int i = 0, array_size = count * sizeof(*pages);
@@ -242,6 +242,23 @@ static struct page **__iommu_dma_alloc_pages(unsigned int count, gfp_t gfp)
 			pages[i++] = page++;
 	}
 	return pages;
+}
+
+
+void iommu_dma_free_from_reserved_range(struct device *dev,
+		struct page **pages, size_t size, dma_addr_t *handle)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+	struct iova_domain *iovad = domain->iova_cookie;
+	unsigned long shift = iova_shift(iovad);
+	unsigned long pfn = (*handle) >> shift;
+	size_t unmap_size;
+
+	unmap_size = iommu_unmap(domain, pfn << shift, size);
+	WARN_ON(size > unmap_size);
+
+	__iommu_dma_free_pages(pages, PAGE_ALIGN(size) >> PAGE_SHIFT);
+	*handle = DMA_ERROR_CODE;
 }
 
 /**
@@ -390,26 +407,58 @@ void iommu_dma_unmap_page(struct device *dev, dma_addr_t handle, size_t size,
 
 /*
  * Prepare a successfully-mapped scatterlist to give back to the caller.
- * Handling IOVA concatenation can come later, if needed
+ *
+ * At this point the segments are already laid out by iommu_dma_map_sg() to
+ * avoid individually crossing any boundaries, so we merely need to check a
+ * segment's start address to avoid concatenating across one.
  */
 static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 		dma_addr_t dma_addr)
 {
-	struct scatterlist *s;
-	int i;
+	struct scatterlist *s, *cur = sg;
+	unsigned long seg_mask = dma_get_seg_boundary(dev);
+	unsigned int cur_len = 0, max_len = dma_get_max_seg_size(dev);
+	int i, count = 0;
 
 	for_each_sg(sg, s, nents, i) {
-		/* Un-swizzling the fields here, hence the naming mismatch */
-		unsigned int s_offset = sg_dma_address(s);
+		/* Restore this segment's original unaligned fields first */
+		unsigned int s_iova_off = sg_dma_address(s);
 		unsigned int s_length = sg_dma_len(s);
-		unsigned int s_dma_len = s->length;
+		unsigned int s_iova_len = s->length;
 
-		s->offset += s_offset;
+		s->offset += s_iova_off;
 		s->length = s_length;
-		sg_dma_address(s) = dma_addr + s_offset;
-		dma_addr += s_dma_len;
+		sg_dma_address(s) = DMA_ERROR_CODE;
+		sg_dma_len(s) = 0;
+
+		/*
+		 * Now fill in the real DMA data. If...
+		 * - there is a valid output segment to append to
+		 * - and this segment starts on an IOVA page boundary
+		 * - but doesn't fall at a segment boundary
+		 * - and wouldn't make the resulting output segment too long
+		 */
+		if (cur_len && !s_iova_off && (dma_addr & seg_mask) &&
+		    (cur_len + s_length <= max_len)) {
+			/* ...then concatenate it with the previous one */
+			cur_len += s_length;
+		} else {
+			/* Otherwise start the next output segment */
+			if (i > 0)
+				cur = sg_next(cur);
+			cur_len = s_length;
+			count++;
+
+			sg_dma_address(cur) = dma_addr + s_iova_off;
+		}
+
+		sg_dma_len(cur) = cur_len;
+		dma_addr += s_iova_len;
+
+		if (s_length + s_iova_off < s_iova_len)
+			cur_len = 0;
 	}
-	return i;
+	return count;
 }
 
 /*
@@ -447,34 +496,40 @@ int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 	struct scatterlist *s, *prev = NULL;
 	dma_addr_t dma_addr;
 	size_t iova_len = 0;
+	unsigned long mask = dma_get_seg_boundary(dev);
 	int i;
 
 	/*
 	 * Work out how much IOVA space we need, and align the segments to
 	 * IOVA granules for the IOMMU driver to handle. With some clever
 	 * trickery we can modify the list in-place, but reversibly, by
-	 * hiding the original data in the as-yet-unused DMA fields.
+	 * stashing the unaligned parts in the as-yet-unused DMA fields.
 	 */
 	for_each_sg(sg, s, nents, i) {
-		size_t s_offset = iova_offset(iovad, s->offset);
+		size_t s_iova_off = iova_offset(iovad, s->offset);
 		size_t s_length = s->length;
+		size_t pad_len = (mask - iova_len + 1) & mask;
 
-		sg_dma_address(s) = s_offset;
+		sg_dma_address(s) = s_iova_off;
 		sg_dma_len(s) = s_length;
-		s->offset -= s_offset;
-		s_length = iova_align(iovad, s_length + s_offset);
+		s->offset -= s_iova_off;
+		s_length = iova_align(iovad, s_length + s_iova_off);
 		s->length = s_length;
 
 		/*
-		 * The simple way to avoid the rare case of a segment
-		 * crossing the boundary mask is to pad the previous one
-		 * to end at a naturally-aligned IOVA for this one's size,
-		 * at the cost of potentially over-allocating a little.
+		 * Due to the alignment of our single IOVA allocation, we can
+		 * depend on these assumptions about the segment boundary mask:
+		 * - If mask size >= IOVA size, then the IOVA range cannot
+		 *   possibly fall across a boundary, so we don't care.
+		 * - If mask size < IOVA size, then the IOVA range must start
+		 *   exactly on a boundary, therefore we can lay things out
+		 *   based purely on segment lengths without needing to know
+		 *   the actual addresses beforehand.
+		 * - The mask must be a power of 2, so pad_len == 0 if
+		 *   iova_len == 0, thus we cannot dereference prev the first
+		 *   time through here (i.e. before it has a meaningful value).
 		 */
-		if (prev) {
-			size_t pad_len = roundup_pow_of_two(s_length);
-
-			pad_len = (pad_len - iova_len) & (pad_len - 1);
+		if (pad_len && pad_len < s_length - 1) {
 			prev->length += pad_len;
 			iova_len += pad_len;
 		}
@@ -513,6 +568,57 @@ void iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nents,
 	 */
 	__iommu_dma_unmap(iommu_get_domain_for_dev(dev), sg_dma_address(sg));
 }
+
+/*
+ * User have to provide the dma address in the reserved iova area for mapping
+ */
+int dma_map_sg_within_reserved_iova(struct device *dev, struct scatterlist *sg,
+				    int nents, int prot, dma_addr_t dma_addr)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+	struct iova_domain *iovad = domain->iova_cookie;
+	struct scatterlist *s, *prev = NULL;
+	size_t iova_len = 0;
+	size_t map_len = 0;
+	int i;
+
+	for_each_sg(sg, s, nents, i) {
+		size_t s_iova_off = iova_offset(iovad, s->offset);
+		size_t s_length = s->length;
+
+		sg_dma_address(s) = s_iova_off;
+		sg_dma_len(s) = s_length;
+		s->offset -= s_iova_off;
+		s_length = iova_align(iovad, s_length + s_iova_off);
+		s->length = s_length;
+
+		iova_len += s_length;
+		prev = s;
+	}
+
+	map_len = iommu_map_sg(domain, dma_addr, sg, nents, prot);
+
+	return __finalise_sg(dev, sg, nents, dma_addr);
+}
+EXPORT_SYMBOL(dma_map_sg_within_reserved_iova);
+
+void dma_unmap_sg_within_reserved_iova(struct device *dev,
+				       struct scatterlist *sg, int nents,
+				       int prot, size_t size)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+	struct iova_domain *iovad = domain->iova_cookie;
+	unsigned long shift = iova_shift(iovad);
+	unsigned long pfn = sg_dma_address(sg) >> shift;
+
+	/*
+	 * The scatterlist segments are mapped into a single
+	 * contiguous IOVA allocation, so this is incredibly easy.
+	 */
+	size -= iommu_unmap(domain, pfn << shift, size);
+	WARN_ON(size > 0);
+}
+EXPORT_SYMBOL(dma_unmap_sg_within_reserved_iova);
 
 int iommu_dma_supported(struct device *dev, u64 mask)
 {

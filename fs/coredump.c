@@ -41,6 +41,9 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 #include <asm/exec.h>
+#if defined(CONFIG_SIE_CRASH_DUMP_SUPPORT_FOR_USER)
+#include <asm/system_misc.h>
+#endif
 
 #include <trace/events/task.h>
 #include "internal.h"
@@ -535,6 +538,10 @@ void do_coredump(const siginfo_t *siginfo)
 		 */
 		.mm_flags = mm->flags,
 	};
+
+#if defined(CONFIG_SIE_CRASH_DUMP_SUPPORT_FOR_USER)
+	die("do_coredump", cprm.regs, 0);
+#endif
 
 	audit_core_dumps(siginfo->si_signo);
 

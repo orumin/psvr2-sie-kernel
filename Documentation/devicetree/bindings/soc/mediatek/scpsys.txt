@@ -12,14 +12,20 @@ power/power_domain.txt. It provides the power domains defined in
 include/dt-bindings/power/mt8173-power.h.
 
 Required properties:
-- compatible: Must be "mediatek,mt8173-scpsys"
+- compatible: Should be one of:
+        - "mediatek,mt8173-scpsys"
+        - "mediatek,mt3612-scpsys"
+	- "mediatek,mt3612ep-scpsys"
 - #power-domain-cells: Must be 1
 - reg: Address range of the SCPSYS unit
 - infracfg: must contain a phandle to the infracfg controller
 - clock, clock-names: clocks according to the common clock binding.
-                      The clocks needed "mm", "mfg", "venc" and "venc_lt".
 		      These are the clocks which hardware needs to be enabled
 		      before enabling certain power domains.
+        Required clocks for MT8173: "mm", "mfg", "venc" and "venc_lt"
+        Reuqired clocks for MT3612: "topckgen", "mmsys_core", "mmsys_com",
+                                    "mmsys_gaze", "camsys_side", "imgsys_side",
+                                    "camsys_gz"
 
 Example:
 

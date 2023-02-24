@@ -42,6 +42,11 @@
 #include <asm/exception.h>
 #include <asm/system_misc.h>
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+int log_on_die;
+EXPORT_SYMBOL(log_on_die);
+#endif
+
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -192,6 +197,24 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	barrier();
 }
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+static void __dump_vregs(void)
+{
+	int i;
+	struct fpsimd_state fpsimd;
+	fpsimd_save_state(&fpsimd);
+	for (i = 31; i >= 0; i--) {
+		printk("v%-2d: %016llx%016llx\n", i,
+			   (uint64_t)(fpsimd.vregs[i] >> 64),
+			   (uint64_t)(fpsimd.vregs[i]));
+	}
+	printk("fpsr: %08x fpcr: %08x\n", fpsimd.fpsr, fpsimd.fpcr);
+	printk("\n");
+}
+#else
+#define __dump_vregs()
+#endif
+
 #ifdef CONFIG_PREEMPT
 #define S_PREEMPT " PREEMPT"
 #else
@@ -216,6 +239,7 @@ static int __die(const char *str, int err, struct thread_info *thread,
 
 	print_modules();
 	__show_regs(regs);
+	__dump_vregs();
 	pr_emerg("Process %.*s (pid: %d, stack limit = 0x%p)\n",
 		 TASK_COMM_LEN, tsk->comm, task_pid_nr(tsk), thread + 1);
 
@@ -240,6 +264,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 	struct thread_info *thread = current_thread_info();
 	int ret;
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	log_on_die = 1;
+#endif
+
 	oops_enter();
 
 	raw_spin_lock_irq(&die_lock);
@@ -261,6 +289,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 		panic("Fatal exception");
 	if (ret != NOTIFY_STOP)
 		do_exit(SIGSEGV);
+
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	log_on_die = 0;
+#endif
 }
 
 void arm64_notify_die(const char *str, struct pt_regs *regs,

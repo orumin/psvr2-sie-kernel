@@ -433,4 +433,5 @@ config PWM_VT8500
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-vt8500.
 
+source drivers/pwm/mediatek/Kconfig
 endif

@@ -31,6 +31,7 @@
 
 #include "xhci.h"
 #include "xhci-trace.h"
+#include "xhci-mtk.h"
 
 #define DRIVER_AUTHOR "Sarah Sharp"
 #define DRIVER_DESC "'eXtensible' Host Controller (xHC) Driver"
@@ -204,6 +205,13 @@ int xhci_reset(struct xhci_hcd *xhci)
 		xhci->bus_state[i].port_c_suspend = 0;
 		xhci->bus_state[i].suspended_ports = 0;
 		xhci->bus_state[i].resuming_ports = 0;
+	}
+
+
+	if (xhci->quirks & XHCI_MTK_HOST) {
+		struct usb_hcd *hcd = xhci_to_hcd(xhci);
+
+		xhci_mtk_retimer(hcd);
 	}
 
 	return ret;
@@ -601,6 +609,10 @@ int xhci_run(struct usb_hcd *hcd)
 	u64 temp_64;
 	int ret;
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct xhci_hcd_mtk *mtk = hcd_to_mtk(hcd);
+	struct mu3c_ippc_regs __iomem *ippc = mtk->ippc_regs;
+	u32 value;
+
 
 	/* Start the xHCI host controller running only after the USB 2.0 roothub
 	 * is setup.
@@ -635,7 +647,13 @@ int xhci_run(struct usb_hcd *hcd)
 			"// Set the interrupt modulation register");
 	temp = readl(&xhci->ir_set->irq_control);
 	temp &= ~ER_IRQ_INTERVAL_MASK;
-	temp |= (u32) 160;
+
+	/* read HW sub ID */
+	value = readl(&ippc->ssusb_hw_sub_id);
+	if (value != HOST_SSUSB_HW_SUB_ID)
+		temp |= (u32) ((xhci->quirks & XHCI_MTK_HOST) ? 11 : 160);
+	else
+		temp |= (u32) ((xhci->quirks & XHCI_MTK_HOST) ? 20 : 160);
 	writel(temp, &xhci->ir_set->irq_control);
 
 	/* Set the HCD state before we enable the irqs */
@@ -1691,6 +1709,9 @@ int xhci_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev,
 
 	xhci_endpoint_zero(xhci, xhci->devs[udev->slot_id], ep);
 
+	if (xhci->quirks & XHCI_MTK_HOST)
+		xhci_mtk_drop_ep_quirk(hcd, udev, ep);
+
 	xhci_dbg(xhci, "drop ep 0x%x, slot id %d, new drop flags = %#x, new add flags = %#x\n",
 			(unsigned int) ep->desc.bEndpointAddress,
 			udev->slot_id,
@@ -1788,6 +1809,15 @@ int xhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev,
 
 	ctrl_ctx->add_flags |= cpu_to_le32(added_ctxs);
 	new_add_flags = le32_to_cpu(ctrl_ctx->add_flags);
+
+	if (xhci->quirks & XHCI_MTK_HOST) {
+		ret = xhci_mtk_add_ep_quirk(hcd, udev, ep);
+		if (ret < 0) {
+			xhci_free_or_cache_endpoint_ring(xhci,
+							 virt_dev, ep_index);
+			return ret;
+		}
+	}
 
 	/* If xhci_endpoint_disable() was called for this endpoint, but the
 	 * xHC hasn't been notified yet through the check_bandwidth() call,

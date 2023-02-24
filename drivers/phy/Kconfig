@@ -6,6 +6,7 @@ menu "PHY Subsystem"
 
 config GENERIC_PHY
 	bool "PHY Core"
+
 	help
 	  Generic PHY support.
 
@@ -391,4 +392,5 @@ config PHY_CYGNUS_PCIE
 	  Enable this to support the Broadcom Cygnus PCIe PHY.
 	  If unsure, say N.
 
+source "drivers/phy/mediatek/Kconfig"
 endmenu

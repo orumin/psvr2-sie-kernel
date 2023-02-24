@@ -21,7 +21,7 @@
 #include <sound/tlv.h>
 
 #include "cs42xx8.h"
-
+#define SUPPORT_MTK_I2S
 #define CS42XX8_NUM_SUPPLIES 4
 static const char *const cs42xx8_supply_names[CS42XX8_NUM_SUPPLIES] = {
 	"VA",
@@ -268,8 +268,16 @@ static int cs42xx8_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	mask = CS42XX8_FUNCMOD_MFREQ_MASK;
+#ifdef SUPPORT_MTK_I2S
+	if (cs42xx8->sysclk <= 12800000)
+		val = 0 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+	else if (cs42xx8->sysclk <= 25600000)
+		val = 2 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+	else
+		val = 4 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+#else
 	val = cs42xx8_ratios[i].mclk;
-
+#endif
 	fm = cs42xx8->slave_mode ? CS42XX8_FM_AUTO : cs42xx8_ratios[i].speed;
 
 	regmap_update_bits(cs42xx8->regmap, CS42XX8_FUNCMOD,
@@ -433,12 +441,22 @@ const struct of_device_id cs42xx8_of_match[] = {
 MODULE_DEVICE_TABLE(of, cs42xx8_of_match);
 EXPORT_SYMBOL_GPL(cs42xx8_of_match);
 
+#ifdef SUPPORT_MTK_I2S
+struct regmap *cs42448_regmap;
+struct device *cs42448_dev;
+#endif
 int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 {
 	const struct of_device_id *of_id;
 	struct cs42xx8_priv *cs42xx8;
-	int ret, val, i;
+#ifndef SUPPORT_MTK_I2S
+	int i;
+#endif
+	int ret, val;
 
+#ifdef SUPPORT_MTK_I2S
+	dev_err(dev, "cs42xx8_probe start");
+#endif
 	if (IS_ERR(regmap)) {
 		ret = PTR_ERR(regmap);
 		dev_err(dev, "failed to allocate regmap: %d\n", ret);
@@ -452,6 +470,11 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 	cs42xx8->regmap = regmap;
 	dev_set_drvdata(dev, cs42xx8);
 
+#ifdef SUPPORT_MTK_I2S
+	cs42448_regmap = regmap;
+	cs42448_dev = dev;
+#endif
+
 	of_id = of_match_device(cs42xx8_of_match, dev);
 	if (of_id)
 		cs42xx8->drvdata = of_id->data;
@@ -460,7 +483,7 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 		dev_err(dev, "failed to find driver data\n");
 		return -EINVAL;
 	}
-
+#ifndef SUPPORT_MTK_I2S
 	cs42xx8->clk = devm_clk_get(dev, "mclk");
 	if (IS_ERR(cs42xx8->clk)) {
 		dev_err(dev, "failed to get the clock: %ld\n",
@@ -486,7 +509,7 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 		dev_err(dev, "failed to enable supplies: %d\n", ret);
 		return ret;
 	}
-
+#endif
 	/* Make sure hardware reset done */
 	msleep(5);
 
@@ -527,17 +550,32 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 		dev_err(dev, "failed to register codec:%d\n", ret);
 		goto err_enable;
 	}
+	dev_info(dev, "codec reg ready\n");
 
+#ifndef SUPPORT_MTK_I2S
 	regcache_cache_only(cs42xx8->regmap, true);
+#else
+	regcache_cache_only(cs42xx8->regmap, false);
+
+	ret = regcache_sync(cs42xx8->regmap);
+	if (ret) {
+		dev_err(dev, "failed to sync regmap: %d\n", ret);
+		goto err_enable;
+	}
+#endif
+
 
 err_enable:
+#ifndef SUPPORT_MTK_I2S
 	regulator_bulk_disable(ARRAY_SIZE(cs42xx8->supplies),
 			       cs42xx8->supplies);
+#endif
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cs42xx8_probe);
 
+#ifndef SUPPORT_MTK_I2S
 #ifdef CONFIG_PM
 static int cs42xx8_runtime_resume(struct device *dev)
 {
@@ -593,9 +631,53 @@ static int cs42xx8_runtime_suspend(struct device *dev)
 	return 0;
 }
 #endif
+#endif
+
+#ifdef SUPPORT_MTK_I2S
+#define DISABLE 0
+#define ENABLE 1
+void i2s_setting(int mode, unsigned int sysclk)
+{
+	int val;
+
+	if (mode == DISABLE) {
+		regmap_write(cs42448_regmap, CS42XX8_PWRCTL, 0xFF);
+		regmap_write(cs42448_regmap, CS42XX8_DACMUTE, 0xFF);
+	} else {
+		regmap_update_bits(cs42448_regmap, CS42XX8_FUNCMOD,
+				   CS42XX8_FUNCMOD_DAC_FM_MASK,
+				   CS42XX8_FUNCMOD_DAC_FM(3));
+		regmap_update_bits(cs42448_regmap, CS42XX8_FUNCMOD,
+				   CS42XX8_FUNCMOD_ADC_FM_MASK,
+				   CS42XX8_FUNCMOD_ADC_FM(3));
+		if (sysclk <= 12800000)
+			val = 0 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+		else if (sysclk <= 25600000)
+			val = 2 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+		else
+			val = 4 << CS42XX8_FUNCMOD_MFREQ_SHIFT;
+		regmap_update_bits(cs42448_regmap, CS42XX8_FUNCMOD,
+				   CS42XX8_FUNCMOD_MFREQ_MASK,
+				   val);
+
+		val = CS42XX8_INTF_DAC_DIF_I2S | CS42XX8_INTF_ADC_DIF_I2S;
+		regmap_update_bits(cs42448_regmap, CS42XX8_INTF,
+				   CS42XX8_INTF_DAC_DIF_MASK |
+				   CS42XX8_INTF_ADC_DIF_MASK |
+				   CS42XX8_INTF_FREEZE_MASK, val);
+
+		regmap_write(cs42448_regmap, CS42XX8_PWRCTL, 0);
+		regmap_write(cs42448_regmap, CS42XX8_DACMUTE, 0);
+	}
+}
+EXPORT_SYMBOL(i2s_setting);
+#endif
+
 
 const struct dev_pm_ops cs42xx8_pm = {
+#ifndef SUPPORT_MTK_I2S
 	SET_RUNTIME_PM_OPS(cs42xx8_runtime_suspend, cs42xx8_runtime_resume, NULL)
+#endif
 };
 EXPORT_SYMBOL_GPL(cs42xx8_pm);
 

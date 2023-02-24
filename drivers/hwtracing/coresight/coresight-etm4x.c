@@ -2706,6 +2706,11 @@ static struct amba_id etm4_ids[] = {
 		.mask	= 0x000fffff,
 		.data	= "ETM 4.0",
 	},
+	{       /* ETM 4.x - Mediatek */
+		.id	= 0x000bb9da,
+		.mask	= 0x000fffff,
+		.data	= "ETM 4.0",
+	},
 	{ 0, 0},
 };
 

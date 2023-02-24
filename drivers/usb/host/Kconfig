@@ -41,6 +41,17 @@ config USB_XHCI_PLATFORM
 
 	  If unsure, say N.
 
+config USB_XHCI_MTK
+	tristate "xHCI support for Mediatek SSUSB HCD"
+	select MFD_SYSCON
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	---help---
+	  Adds an xHCI host driver for Mediatek platform device, which
+	  provides a memory space and an irq.
+	  Say 'Y' to enable support for Mediatek xHCI host controller
+	  found in Mediatek SSUSB SoCs.
+	  If unsure, say N.
+
 config USB_XHCI_MVEBU
 	tristate "xHCI support for Marvell Armada 375/38x"
 	select USB_XHCI_PLATFORM

@@ -16,6 +16,60 @@
  * GNU General Public License for more details.
  */
 
+/**
+ * @file mtk_timer.c
+ * The gpt driver is a software module that responsible for generating
+ * a system alarm and getting system time.
+ * The gpt driver provides the interfaces which will be used in linux
+ * clockevent and clocksource framework and register the gpt clockevent
+ * and clocksource devices in linux system.
+ */
+
+/**
+ * @defgroup IP_group_gpt GPT
+ *   There are total 5 32-bit GPT (GPT1~GPT5) and 1 64-bit GPT (GPT6) in SOC.
+ *   Currently only GPT1(GPT_CLK_EVT) is used as a clock event trigger, and
+ *   GPT2(GPT_CLK_SRC) is used as a clock source for system by default.
+ *
+ *   @{
+ *       @defgroup IP_group_gpt_external EXTERNAL
+ *         The external API document for gpt.
+ *
+ *         @{
+ *            @defgroup IP_group_gpt_external_function 1.function
+ *              none. External function reference for gpt.
+ *            @defgroup IP_group_gpt_external_struct 2.structure
+ *              none. External structure for gpt.
+ *            @defgroup IP_group_gpt_external_typedef 3.typedef
+ *              none. External typedef for gpt.
+ *            @defgroup IP_group_gpt_external_enum 4.enumeration
+ *              none. External enumeration for gpt.
+ *            @defgroup IP_group_gpt_external_def 5.define
+ *              none. External define for gpt.
+ *         @}
+ *
+ *       @defgroup IP_group_gpt_internal INTERNAL
+ *         The internal API document for gpt.
+ *
+ *         @{
+ *            @defgroup IP_group_gpt_internal_function 1.function
+ *              Internal function reference for gpt.
+ *            @defgroup IP_group_gpt_internal_struct 2.structure
+ *              Internal structure for gpt.
+ *            @defgroup IP_group_gpt_internal_typedef 3.typedef
+ *              none. Internal typedef for gpt.
+ *            @defgroup IP_group_gpt_internal_enum 4.enumeration
+ *              none. Internal enumeration for gpt.
+ *            @defgroup IP_group_gpt_internal_def 5.define
+ *              Internal define for gpt.
+ *         @}
+ *    @}
+ */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ":%s: " fmt, __func__
+/** @brief Some of the include files of the declaration
+ * @{
+ */
 #include <linux/clk.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
@@ -26,7 +80,14 @@
 #include <linux/of_irq.h>
 #include <linux/sched_clock.h>
 #include <linux/slab.h>
+/**
+ * @}
+ */
 
+/** @ingroup IP_group_gpt_internal_def
+ * @brief brief for below all define.
+ * @{
+ */
 #define GPT_IRQ_EN_REG		0x00
 #define GPT_IRQ_ENABLE(val)	BIT((val) - 1)
 #define GPT_IRQ_ACK_REG		0x08
@@ -36,6 +97,7 @@
 #define TIMER_CTRL_OP(val)	(((val) & 0x3) << 4)
 #define TIMER_CTRL_OP_ONESHOT	(0)
 #define TIMER_CTRL_OP_REPEAT	(1)
+#define TIMER_CTRL_OP_KEEPGO	(2)
 #define TIMER_CTRL_OP_FREERUN	(3)
 #define TIMER_CTRL_CLEAR	(2)
 #define TIMER_CTRL_ENABLE	(1)
@@ -53,26 +115,81 @@
 
 #define GPT_CLK_EVT	1
 #define GPT_CLK_SRC	2
+/**
+ * @}
+ */
 
+/** @ingroup IP_group_gpt_internal_struct
+ * @brief Used to define GPT device structure.
+ */
 struct mtk_clock_event_device {
+	/** mapped GPT register base address */
 	void __iomem *gpt_base;
+	/** ticks per jiffy for GPT counter */
 	u32 ticks_per_jiffy;
+	/** clock_event_device structure for event clock (GPT_CLK_EVT)*/
 	struct clock_event_device dev;
 };
 
 static void __iomem *gpt_sched_reg __read_mostly;
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Get clock source counter value.
+ *     This function is used as read() of the sched clock in system, and it is
+ *     registered by mtk_timer_init().
+ * @param[in]
+ *     none.
+ * @return
+ *     return clock source counter value.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static u64 notrace mtk_read_sched_clock(void)
 {
 	return readl_relaxed(gpt_sched_reg);
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Get mtk_clock_event_device pointer by clock_event_device pointer.
+ * @param[in]
+ *     c: a clock_event_device structure pointer.
+ * @return
+ *     mtk_clock_event_device structure pointer.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static inline struct mtk_clock_event_device *to_mtk_clk(
 				struct clock_event_device *c)
 {
 	return container_of(c, struct mtk_clock_event_device, dev);
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Stop GPT.
+ * @param[in]
+ *     evt: mtk_clock_event_device structure pointer.
+ * @param[in]
+ *     timer: the serial number of the stopped GPT.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void mtk_clkevt_time_stop(struct mtk_clock_event_device *evt, u8 timer)
 {
 	u32 val;
@@ -82,12 +199,49 @@ static void mtk_clkevt_time_stop(struct mtk_clock_event_device *evt, u8 timer)
 			TIMER_CTRL_REG(timer));
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Set GPT compare value.
+ * @param[in]
+ *     evt: mtk_clock_event_device structure pointer.
+ * @param[in]
+ *     delay: the compare value for the set GPT.
+ * @param[in]
+ *     timer: the serial number of the set GPT.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void mtk_clkevt_time_setup(struct mtk_clock_event_device *evt,
 				unsigned long delay, u8 timer)
 {
 	writel(delay, evt->gpt_base + TIMER_CMP_REG(timer));
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Start GPT.
+ * @param[in]
+ *     evt: mtk_clock_event_device structure pointer.
+ * @param[in]
+ *     periodic: 0, set GPT as one-shot mode.
+ *               1, set GPT as repeat mode.
+ * @param[in]
+ *     timer: the serial number of the started GPT.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void mtk_clkevt_time_start(struct mtk_clock_event_device *evt,
 		bool periodic, u8 timer)
 {
@@ -110,12 +264,40 @@ static void mtk_clkevt_time_start(struct mtk_clock_event_device *evt,
 	       evt->gpt_base + TIMER_CTRL_REG(timer));
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Shutdown clock event GPT (GPT_CLK_EVT).
+ * @param[in]
+ *     clk: clock_event_device structure pointer.
+ * @return
+ *     always return 0 (success).
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static int mtk_clkevt_shutdown(struct clock_event_device *clk)
 {
 	mtk_clkevt_time_stop(to_mtk_clk(clk), GPT_CLK_EVT);
 	return 0;
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Set and start periodic trigger task for clock event GPT (GPT_CLK_EVT).
+ * @param[in]
+ *     clk: clock_event_device structure pointer.
+ * @return
+ *     always return 0 (success).
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static int mtk_clkevt_set_periodic(struct clock_event_device *clk)
 {
 	struct mtk_clock_event_device *evt = to_mtk_clk(clk);
@@ -126,6 +308,22 @@ static int mtk_clkevt_set_periodic(struct clock_event_device *clk)
 	return 0;
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Set and start one-shot trigger task for clock event GPT (GPT_CLK_EVT).
+ * @param[in]
+ *     event: the compare value for GPT_CLK_EVT.
+ * @param[in]
+ *     clk: clock_event_device structure pointer.
+ * @return
+ *     always return 0 (success).
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static int mtk_clkevt_next_event(unsigned long event,
 				   struct clock_event_device *clk)
 {
@@ -138,6 +336,22 @@ static int mtk_clkevt_next_event(unsigned long event,
 	return 0;
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Interrupt handler for clock event by GPT_CLK_EVT.
+ * @param[in]
+ *     irq: virq number.
+ * @param[in]
+ *     dev_id: device ID.
+ * @return
+ *     always return IRQ_HANDLED.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static irqreturn_t mtk_timer_interrupt(int irq, void *dev_id)
 {
 	struct mtk_clock_event_device *evt = dev_id;
@@ -149,6 +363,24 @@ static irqreturn_t mtk_timer_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Set and start GPT.
+ * @param[in]
+ *     evt: mtk_clock_event_device structure pointer.
+ * @param[in]
+ *     timer: the serial number of the set GPT.
+ * @param[in]
+ *     option: the count mode of the set GPT.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void
 mtk_timer_setup(struct mtk_clock_event_device *evt, u8 timer, u8 option)
 {
@@ -164,6 +396,22 @@ mtk_timer_setup(struct mtk_clock_event_device *evt, u8 timer, u8 option)
 			evt->gpt_base + TIMER_CTRL_REG(timer));
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Enable irq for the GPT.
+ * @param[in]
+ *     evt: mtk_clock_event_device pionter.
+ * @param[in]
+ *     timer: the serial number of the set GPT.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void mtk_timer_enable_irq(struct mtk_clock_event_device *evt, u8 timer)
 {
 	u32 val;
@@ -179,6 +427,20 @@ static void mtk_timer_enable_irq(struct mtk_clock_event_device *evt, u8 timer)
 			evt->gpt_base + GPT_IRQ_EN_REG);
 }
 
+/** @ingroup IP_group_gpt_internal_function
+ * @par Description
+ *     Mediatek GPT driver init function.
+ * @param[in]
+ *     node: GPT device node from device tree.
+ * @return
+ *     none.
+ * @par Boundary case and Limitation
+ *     none.
+ * @par Error case and Error handling
+ *     none
+ * @par Call graph and Caller graph (refer to the graph below)
+ * @par Refer to the source code
+ */
 static void __init mtk_timer_init(struct device_node *node)
 {
 	struct mtk_clock_event_device *evt;
@@ -205,7 +467,7 @@ static void __init mtk_timer_init(struct device_node *node)
 	evt->gpt_base = of_io_request_and_map(node, 0, "mtk-timer");
 	if (IS_ERR(evt->gpt_base)) {
 		pr_warn("Can't get resource\n");
-		return;
+		goto err_evt;
 	}
 
 	evt->dev.irq = irq_of_parse_and_map(node, 0);
@@ -247,7 +509,7 @@ static void __init mtk_timer_init(struct device_node *node)
 					0xffffffff);
 
 	mtk_timer_enable_irq(evt, GPT_CLK_EVT);
-
+	pr_info("GPT init finish\n");
 	return;
 
 err_clk_disable:
@@ -258,7 +520,9 @@ err_irq:
 	irq_dispose_mapping(evt->dev.irq);
 err_mem:
 	iounmap(evt->gpt_base);
-	of_address_to_resource(node, 0, &res);
-	release_mem_region(res.start, resource_size(&res));
+	if (!of_address_to_resource(node, 0, &res))
+		release_mem_region(res.start, resource_size(&res));
+err_evt:
+	kfree(evt);
 }
 CLOCKSOURCE_OF_DECLARE(mtk_mt6577, "mediatek,mt6577-timer", mtk_timer_init);

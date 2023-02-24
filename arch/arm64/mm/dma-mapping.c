@@ -24,6 +24,7 @@
 #include <linux/genalloc.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-contiguous.h>
+#include <linux/iova.h>
 #include <linux/vmalloc.h>
 #include <linux/swiotlb.h>
 
@@ -170,7 +171,7 @@ static void *__dma_alloc(struct device *dev, size_t size,
 	/* create a coherent mapping */
 	page = virt_to_page(ptr);
 	coherent_ptr = dma_common_contiguous_remap(page, size, VM_USERMAP,
-						   prot, NULL);
+						   prot, __builtin_return_address(0));
 	if (!coherent_ptr)
 		goto no_map;
 
@@ -618,7 +619,7 @@ static void __iommu_free_attrs(struct device *dev, size_t size, void *cpu_addr,
 	if (__in_atomic_pool(cpu_addr, size)) {
 		iommu_dma_unmap_page(dev, handle, iosize, 0, NULL);
 		__free_from_pool(cpu_addr, size);
-	} else if (is_vmalloc_addr(cpu_addr)){
+	} else if (is_vmalloc_addr(cpu_addr)) {
 		struct vm_struct *area = find_vm_area(cpu_addr);
 
 		if (WARN_ON(!area || !area->pages))
@@ -975,6 +976,116 @@ void arch_teardown_dma_ops(struct device *dev)
 
 	dev->archdata.dma_ops = NULL;
 }
+
+/*
+ * let user pass the parameters including
+ * 1. iommu device
+ * 2. the desired dma_addr from reserved range
+ *    (the iova start address is managed by user)
+ * 3. the iova buffer size
+ * 4. gfp flag
+ * return the va of caller space
+ */
+void *dma_alloc_coherent_fix_iova(struct device *dev, dma_addr_t dma_addr,
+				  size_t size, gfp_t flag)
+{
+	/* User pass the desired dma start address and size from the
+	 * reserved iova range. Then it maps the va and pa into a
+	 * scaterlist, uses the iova and scatterlist to complete the
+	 * iommu pagetable, finally it returns the va to caller.
+	 */
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+	struct iova_domain *iovad;
+	int prot = IOMMU_READ | IOMMU_WRITE;
+	void *addr = NULL;
+	struct sg_table sgt;
+	struct page **pages;
+	unsigned int count = PAGE_ALIGN(size) >> PAGE_SHIFT;
+	size_t iosize = size;
+	bool coherent = is_device_dma_coherent(dev);
+	pgprot_t ioprot = __get_dma_pgprot(NULL, PAGE_KERNEL, coherent);
+
+	if (domain)
+		iovad = domain->iova_cookie;
+	else {
+		pr_warn("iommu domain is null !\n");
+		return NULL;
+	}
+
+	/* calculate the pages we need */
+	pages = __iommu_dma_alloc_pages(count, flag);
+	if (!pages)
+		return NULL;
+
+	size = iova_align(iovad, size);
+	/* allocate the scatterlist table from page information */
+	if (sg_alloc_table_from_pages(&sgt, pages, count, 0, size, GFP_KERNEL))
+		goto out_free_sg;
+
+	if (!(prot & IOMMU_CACHE)) {
+		struct sg_mapping_iter miter;
+		/*
+		 * The CPU-centric flushing implied by SG_MITER_TO_SG isn't
+		 * sufficient here, so skip it by using the "wrong" direction.
+		 */
+		sg_miter_start(&miter, sgt.sgl, sgt.orig_nents,
+			       SG_MITER_FROM_SG);
+		while (sg_miter_next(&miter))
+			flush_page(dev, miter.addr, page_to_phys(miter.page));
+		sg_miter_stop(&miter);
+	}
+
+	if (iommu_map_sg(domain, dma_addr, sgt.sgl, sgt.orig_nents, prot) <
+	    size)
+		goto out_free_sg;
+
+	sg_free_table(&sgt);
+
+	addr =
+	    dma_common_pages_remap(pages, size, VM_USERMAP, ioprot,
+				   __builtin_return_address(0));
+	if (!addr)
+		iommu_dma_free_from_reserved_range(dev, pages, iosize,
+						   &dma_addr);
+
+	return addr;
+
+out_free_sg:
+	sg_free_table(&sgt);
+	__iommu_dma_free_pages(pages, count);
+	return NULL;
+}
+EXPORT_SYMBOL(dma_alloc_coherent_fix_iova);
+
+void dma_free_coherent_fix_iova(struct device *dev, void *cpu_addr,
+				dma_addr_t dma_addr, size_t size)
+{
+	struct vm_struct *area = find_vm_area(cpu_addr);
+	size_t iosize = size;
+
+	size = PAGE_ALIGN(size);
+
+	if (WARN_ON(!area || !area->pages))
+		return;
+	iommu_dma_free_from_reserved_range(dev, area->pages, iosize, &dma_addr);
+	dma_common_free_remap(cpu_addr, size, VM_USERMAP);
+}
+EXPORT_SYMBOL(dma_free_coherent_fix_iova);
+
+int dma_mmap_attrs_cached(struct device *dev, struct vm_area_struct *vma,
+			  void *cpu_addr, dma_addr_t dma_addr,
+			  size_t size, struct dma_attrs *attrs)
+{
+	struct vm_struct *area;
+	/* default vma->vm_page_prot : cached */
+
+	area = find_vm_area(cpu_addr);
+	if (WARN_ON(!area || !area->pages))
+		return -ENXIO;
+
+	return iommu_dma_mmap(area->pages, size, vma);
+}
+EXPORT_SYMBOL(dma_mmap_attrs_cached);
 
 #else
 

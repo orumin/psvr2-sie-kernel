@@ -28,3 +28,20 @@ config SND_SOC_MT8173_RT5650_RT5676
 	  Select Y if you have such device.
 	  If unsure select "N".
 
+config SND_SOC_MT3611
+	tristate "ASoC Audio driver for MT3611 AFE PCM"
+	help
+	  This adds support for ASoC PCM driver for Mediatek MT3611
+	  platforms.
+	  Select Y if you have such device.
+	  If unsure select "N".
+
+config SND_SOC_MT3611_MACH
+	tristate "ASoC Audio driver for MT3611 AFE"
+	select SND_SOC_MT3611
+	select REGMAP_MMIO
+	help
+	  This adds support for ASoC machine driver for Mediatek MT3611
+	  platforms.
+	  Select Y if you have such device.
+	  If unsure select "N".

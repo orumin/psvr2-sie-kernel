@@ -98,6 +98,19 @@ config ARM_TEGRA_DEVFREQ
          It reads ACTMON counters of memory controllers and adjusts the
          operating frequencies and voltages with OPP support.
 
+config ARM_MT3612_DEVFREQ
+       bool "Mediatek MT3612 devfreq support"
+       depends on ARCH_MEDIATEK
+       select DEVFREQ_GOV_SIMPLE_ONDEMAND
+       select PM_OPP
+       help
+	 This adds the DEVFREQ driver
+	 for Mediatek MT3612 SoC.
+
+	 For details, take a look at linux/Documentation/cpu-freq.
+
+	 If in doubt, say N.
+
 source "drivers/devfreq/event/Kconfig"
 
 endif # PM_DEVFREQ

@@ -62,6 +62,12 @@ int console_printk[4] = {
 	CONSOLE_LOGLEVEL_DEFAULT,	/* default_console_loglevel */
 };
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+EXPORT_SYMBOL_GPL(console_printk);
+int use_custom_log = 0;
+EXPORT_SYMBOL(use_custom_log);
+#endif
+
 /*
  * Low level drivers may need that to know if they can schedule in
  * their unblank() callback or not. So let's export it.
@@ -566,13 +572,16 @@ static ssize_t msg_print_ext_body(char *buf, size_t size,
 	for (i = 0; i < text_len; i++) {
 		unsigned char c = text[i];
 
+#ifndef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
 		if (c < ' ' || c >= 127 || c == '\\')
 			p += scnprintf(p, e - p, "\\x%02x", c);
 		else
+#endif
 			append_char(&p, e, c);
 	}
 	append_char(&p, e, '\n');
 
+#ifndef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
 	if (dict_len) {
 		bool line = true;
 
@@ -599,6 +608,7 @@ static ssize_t msg_print_ext_body(char *buf, size_t size,
 		}
 		append_char(&p, e, '\n');
 	}
+#endif
 
 	return p - buf;
 }
@@ -1044,6 +1054,11 @@ static size_t print_time(u64 ts, char *buf)
 	if (!printk_time)
 		return 0;
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	if (use_custom_log)
+		return 0;
+#endif
+
 	rem_nsec = do_div(ts, 1000000000);
 
 	if (!buf)
@@ -1438,8 +1453,14 @@ static void call_console_drivers(int level,
 
 	trace_console_rcuidle(text, len);
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	if (use_custom_log)
+		return;
+#endif
+
 	if (level >= console_loglevel && !ignore_loglevel)
 		return;
+
 	if (!console_drivers)
 		return;
 

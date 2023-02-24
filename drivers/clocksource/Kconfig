@@ -229,6 +229,9 @@ config MTK_TIMER
 	select CLKSRC_OF
 	select CLKSRC_MMIO
 	bool
+	default y
+	help
+	  GPT driver.
 
 config SYS_SUPPORTS_SH_MTU2
         bool

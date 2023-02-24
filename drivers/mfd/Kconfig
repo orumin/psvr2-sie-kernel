@@ -592,6 +592,53 @@ config MFD_MT6397
 	  accessing the device; additional drivers must be enabled in order
 	  to use the functionality of the device.
 
+config MFD_MT6355
+	tristate "MediaTek MT6355 PMIC Support"
+	select MFD_CORE
+	select IRQ_DOMAIN
+	help
+	  Say yes here to add support for MediaTek MT6355 PMIC. This is
+	  a Power Management IC. This driver provides common support for
+	  accessing the device; additional drivers must be enabled in order
+	  to use the functionality of the device.
+
+config MFD_MT3615
+	tristate "MediaTek MT3615 PMIC Support"
+	select MFD_CORE
+	select IRQ_DOMAIN
+	help
+	  Say yes here to add support for MediaTek MT3615 PMIC. This is
+	  a Power Management IC. This driver provides common support for
+	  accessing the device; additional drivers must be enabled in order
+	  to use the functionality of the device.
+
+config MFD_MT3615_STATUS
+	tristate "MediaTek MT3615 PMIC Support with status I/F"
+	select MFD_CORE
+	help
+	  Say yes here to add support for MediaTek MT3615 PMIC. This is
+	  a Power Management IC. This driver provides common support for
+	  accessing the device; additional drivers must be enabled in order
+	  to use the functionality of the device.
+
+config MFD_MT3615_UT
+	bool "MediaTek MT3615 PMIC Unit Test Support"
+	depends on MFD_MT3615
+	help
+	  Say yes here to add support for MediaTek MT3615 PMIC Unit Test. This is
+	  a Unit Test Program. This Unit Test Program provides common support for
+	  accessing the device; additional drivers must be enabled in order
+	  to use the functionality of the program.
+
+config MFD_MT3615_REG
+	bool "MediaTek MT3615 PMIC Register Read/Write"
+	depends on MFD_MT3615 || MFD_MT3615_STATUS
+	help
+	  Say yes here to add support for MediaTek MT3615 PMIC Register Read/Write.
+	  This is a MACRO. This MACRO provides common support for accessing the device
+	  register; additional drivers must be enabled in order
+	  to use the read/write register function.
+
 config MFD_MENF21BMC
 	tristate "MEN 14F021P00 Board Management Controller Support"
 	depends on I2C

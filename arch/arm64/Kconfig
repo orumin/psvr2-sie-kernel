@@ -93,6 +93,7 @@ config ARM64
 	select SPARSE_IRQ
 	select SYSCTL_EXCEPTION_TRACE
 	select HAVE_CONTEXT_TRACKING
+	select HAVE_ARM_SMCCC
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -179,6 +180,28 @@ config PGTABLE_LEVELS
 	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
 	default 3 if ARM64_16K_PAGES && ARM64_VA_BITS_47
 	default 4 if !ARM64_64K_PAGES && ARM64_VA_BITS_48
+
+config SIE
+	def_bool y
+
+if SIE
+menu "SIE Configurations"
+
+comment "SIE related options"
+	depends on SIE
+
+source kernel/Kconfig.sie
+
+endmenu
+endif
+
+menu "MTK Configurations"
+
+comment "MTK related options"
+
+source "kernel/Kconfig.mtk"
+
+endmenu
 
 source "init/Kconfig"
 

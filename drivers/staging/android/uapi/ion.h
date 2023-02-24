@@ -40,7 +40,9 @@ enum ion_heap_type {
 	ION_HEAP_TYPE_CARVEOUT,
 	ION_HEAP_TYPE_CHUNK,
 	ION_HEAP_TYPE_DMA,
-	ION_HEAP_TYPE_CUSTOM, /*
+	ION_HEAP_TYPE_CUSTOM,
+	ION_HEAP_TYPE_GPU_SRAM,
+				/*
 			       * must be last so device specific heaps always
 			       * are at the end of this enum
 			       */
@@ -51,6 +53,8 @@ enum ion_heap_type {
 #define ION_HEAP_SYSTEM_CONTIG_MASK	(1 << ION_HEAP_TYPE_SYSTEM_CONTIG)
 #define ION_HEAP_CARVEOUT_MASK		(1 << ION_HEAP_TYPE_CARVEOUT)
 #define ION_HEAP_TYPE_DMA_MASK		(1 << ION_HEAP_TYPE_DMA)
+#define ION_HEAP_TYPE_GPU_SRAM_MASK	BIT(ION_HEAP_TYPE_GPU_SRAM)
+
 
 #define ION_NUM_HEAP_IDS		(sizeof(unsigned int) * 8)
 

@@ -218,6 +218,10 @@ early_param("quiet", quiet_kernel);
 
 static int __init loglevel(char *str)
 {
+#if defined(CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER) && !defined(CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER_DEBUG)
+	console_loglevel = CONSOLE_LOGLEVEL_SILENT;
+	return 0;
+#else
 	int newlevel;
 
 	/*
@@ -231,6 +235,7 @@ static int __init loglevel(char *str)
 	}
 
 	return -EINVAL;
+#endif
 }
 
 early_param("loglevel", loglevel);

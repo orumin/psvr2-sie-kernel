@@ -2244,7 +2244,9 @@ serial8250_get_baud_rate(struct uart_port *port, struct ktermios *termios,
 	 */
 	return uart_get_baud_rate(port, termios, old,
 				  port->uartclk / 16 / 0xffff,
-				  (port->uartclk + tolerance) / 16);
+				  (port->uartclk + tolerance));
+				// this is mediatek's patch for FPGA low clock rate
+				// (port->uartclk + tolerance) / 16);
 }
 
 void

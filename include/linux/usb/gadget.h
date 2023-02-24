@@ -737,6 +737,16 @@ static inline int gadget_is_superspeed(struct usb_gadget *g)
 }
 
 /**
+ * gadget_is_superspeed_plus() - return true if the hardware handles
+ *	superspeed plus
+ * @g: controller that might support superspeed plus
+ */
+static inline int gadget_is_superspeed_plus(struct usb_gadget *g)
+{
+	return g->max_speed >= USB_SPEED_SUPER_PLUS;
+}
+
+/**
  * gadget_is_otg - return true iff the hardware is OTG-ready
  * @g: controller that might have a Mini-AB connector
  *
@@ -1198,7 +1208,8 @@ struct usb_function;
 int usb_assign_descriptors(struct usb_function *f,
 		struct usb_descriptor_header **fs,
 		struct usb_descriptor_header **hs,
-		struct usb_descriptor_header **ss);
+		struct usb_descriptor_header **ss,
+		struct usb_descriptor_header **ssp);
 void usb_free_all_descriptors(struct usb_function *f);
 
 struct usb_descriptor_header *usb_otg_descriptor_alloc(

@@ -25,6 +25,13 @@
 #include <linux/nmi.h>
 #include <linux/console.h>
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+void (*em_dump_here)(void);
+EXPORT_SYMBOL(em_dump_here);
+int log_on_panic;
+EXPORT_SYMBOL(log_on_panic);
+#endif
+
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
 
@@ -77,6 +84,9 @@ void panic(const char *fmt, ...)
 	long i, i_next = 0;
 	int state = 0;
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	log_on_panic = 1;
+#endif
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
 	 * from deadlocking the first cpu that invokes the panic, since
@@ -112,6 +122,16 @@ void panic(const char *fmt, ...)
 		dump_stack();
 #endif
 
+#ifdef CONFIG_SIE_PRINTK_CUSTOM_LOG_DRIVER
+	if (em_dump_here) {
+#define IRQ_SERIAL 13
+		unsigned int core;
+
+		core = raw_smp_processor_id();
+		irq_set_affinity(IRQ_SERIAL, cpumask_of(core));
+		em_dump_here();
+	}
+#endif
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle
 	 * everything else.
@@ -204,6 +224,7 @@ void panic(const char *fmt, ...)
 #endif
 	pr_emerg("---[ end Kernel panic - not syncing: %s\n", buf);
 	local_irq_enable();
+
 	for (i = 0; ; i += PANIC_TIMER_STEP) {
 		touch_softlockup_watchdog();
 		if (i >= i_next) {

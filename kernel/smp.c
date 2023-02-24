@@ -574,6 +574,10 @@ void __init smp_init(void)
 	for_each_present_cpu(cpu) {
 		if (num_online_cpus() >= setup_max_cpus)
 			break;
+#if defined(CONFIG_NR_CPUS_DURING_BOOT)
+		if (num_online_cpus() >= CONFIG_NR_CPUS_DURING_BOOT)
+			break;
+#endif
 		if (!cpu_online(cpu))
 			cpu_up(cpu);
 	}

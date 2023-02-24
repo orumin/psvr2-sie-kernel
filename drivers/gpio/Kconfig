@@ -30,6 +30,13 @@ config ARCH_REQUIRE_GPIOLIB
 	  Selecting this from the architecture code will cause the gpiolib
 	  code to always get built in.
 
+config TMRIO_MT3612
+	tristate "MediaTek TMRIO driver"
+	help
+	  TMRIO: tmimer IO module.
+	  TMRIO driver support for MediaTek SOC.
+	  If you want to use MediaTek TMRIO driver, say Y or M here.
+	  If unsure, say N.
 
 menuconfig GPIOLIB
 	bool "GPIO Support"

@@ -404,10 +404,6 @@ static void _remove_devfreq(struct devfreq *devfreq)
 	list_del(&devfreq->node);
 	mutex_unlock(&devfreq_list_lock);
 
-	if (devfreq->governor)
-		devfreq->governor->event_handler(devfreq,
-						 DEVFREQ_GOV_STOP, NULL);
-
 	if (devfreq->profile->exit)
 		devfreq->profile->exit(devfreq->dev.parent);
 
@@ -517,7 +513,7 @@ struct devfreq *devfreq_add_device(struct device *dev,
 
 err_init:
 	list_del(&devfreq->node);
-	device_unregister(&devfreq->dev);
+	devfreq_remove_device(devfreq);
 	kfree(devfreq);
 err_out:
 	return ERR_PTR(err);
@@ -535,8 +531,10 @@ int devfreq_remove_device(struct devfreq *devfreq)
 	if (!devfreq)
 		return -EINVAL;
 
+	if (devfreq->governor)
+		devfreq->governor->event_handler(devfreq,
+						 DEVFREQ_GOV_STOP, NULL);
 	device_unregister(&devfreq->dev);
-	put_device(&devfreq->dev);
 
 	return 0;
 }

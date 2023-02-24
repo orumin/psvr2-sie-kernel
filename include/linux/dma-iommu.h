@@ -38,11 +38,15 @@ int dma_direction_to_prot(enum dma_data_direction dir, bool coherent);
  * These implement the bulk of the relevant DMA mapping callbacks, but require
  * the arch code to take care of attributes and cache maintenance
  */
+struct page **__iommu_dma_alloc_pages(unsigned int count, gfp_t gfp);
+void __iommu_dma_free_pages(struct page **pages, int count);
 struct page **iommu_dma_alloc(struct device *dev, size_t size,
 		gfp_t gfp, int prot, dma_addr_t *handle,
 		void (*flush_page)(struct device *, const void *, phys_addr_t));
 void iommu_dma_free(struct device *dev, struct page **pages, size_t size,
 		dma_addr_t *handle);
+void iommu_dma_free_from_reserved_range(struct device *dev,
+		struct page **pages, size_t size, dma_addr_t *handle);
 
 int iommu_dma_mmap(struct page **pages, size_t size, struct vm_area_struct *vma);
 

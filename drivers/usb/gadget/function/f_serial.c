@@ -98,6 +98,7 @@ static struct usb_descriptor_header *gser_hs_function[] = {
 	(struct usb_descriptor_header *) &gser_hs_out_desc,
 	NULL,
 };
+/* super speed support: */
 
 static struct usb_endpoint_descriptor gser_ss_in_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
@@ -114,11 +115,21 @@ static struct usb_endpoint_descriptor gser_ss_out_desc = {
 };
 
 static struct usb_ss_ep_comp_descriptor gser_ss_bulk_comp_desc = {
-	.bLength =              sizeof gser_ss_bulk_comp_desc,
+	.bLength =              sizeof(gser_ss_bulk_comp_desc),
 	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
 };
 
 static struct usb_descriptor_header *gser_ss_function[] = {
+	(struct usb_descriptor_header *) &gser_interface_desc,
+	(struct usb_descriptor_header *) &gser_ss_in_desc,
+	(struct usb_descriptor_header *) &gser_ss_bulk_comp_desc,
+	(struct usb_descriptor_header *) &gser_ss_out_desc,
+	(struct usb_descriptor_header *) &gser_ss_bulk_comp_desc,
+	NULL,
+};
+
+/* super plus support: */
+static struct usb_descriptor_header *gser_ssp_function[] = {
 	(struct usb_descriptor_header *) &gser_interface_desc,
 	(struct usb_descriptor_header *) &gser_ss_in_desc,
 	(struct usb_descriptor_header *) &gser_ss_bulk_comp_desc,
@@ -236,7 +247,7 @@ static int gser_bind(struct usb_configuration *c, struct usb_function *f)
 	gser_ss_out_desc.bEndpointAddress = gser_fs_out_desc.bEndpointAddress;
 
 	status = usb_assign_descriptors(f, gser_fs_function, gser_hs_function,
-			gser_ss_function);
+			gser_ss_function, gser_ssp_function);
 	if (status)
 		goto fail;
 	dev_dbg(&cdev->gadget->dev, "generic ttyGS%d: %s speed IN/%s OUT/%s\n",

@@ -1478,7 +1478,7 @@ static void kmemleak_scan(void)
  */
 static int kmemleak_scan_thread(void *arg)
 {
-	static int first_run = 1;
+	static int first_run = IS_ENABLED(CONFIG_DEBUG_KMEMLEAK_AUTO_SCAN);
 
 	pr_info("Automatic memory scanning thread started\n");
 	set_user_nice(current, 10);
@@ -1966,9 +1966,11 @@ static int __init kmemleak_late_init(void)
 				     &kmemleak_fops);
 	if (!dentry)
 		pr_warning("Failed to create the debugfs kmemleak file\n");
-	mutex_lock(&scan_mutex);
-	start_scan_thread();
-	mutex_unlock(&scan_mutex);
+	if (IS_ENABLED(CONFIG_DEBUG_KMEMLEAK_AUTO_SCAN)) {
+		mutex_lock(&scan_mutex);
+		start_scan_thread();
+		mutex_unlock(&scan_mutex);
+	}
 
 	pr_info("Kernel memory leak detector initialized\n");
 

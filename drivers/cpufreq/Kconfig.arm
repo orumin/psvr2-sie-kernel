@@ -81,6 +81,21 @@ config ARM_KIRKWOOD_CPUFREQ
 	  This adds the CPUFreq driver for Marvell Kirkwood
 	  SoCs.
 
+config ARM_MT3612_CPUFREQ
+	bool "Mediatek MT3612 CPUFreq support"
+	depends on ARCH_MEDIATEK && REGULATOR
+	depends on ARM64 || (ARM_CPU_TOPOLOGY && COMPILE_TEST)
+	depends on !CPU_THERMAL || THERMAL=y
+	depends on MTK_SCP=y
+	select PM_OPP
+	help
+	  This adds the CPUFreq driver support
+	  for Mediatek MT3612 SoC.
+
+	  For details, take a look at linux/Documentation/cpu-freq.
+
+	  If in doubt, say N.
+
 config ARM_MT8173_CPUFREQ
 	bool "Mediatek MT8173 CPUFreq support"
 	depends on ARCH_MEDIATEK && REGULATOR

@@ -317,6 +317,8 @@ static inline size_t iommu_map_sg(struct iommu_domain *domain,
 	return domain->ops->map_sg(domain, iova, sg, nents, prot);
 }
 
+extern void __iommu_dma_unmap(struct iommu_domain *domain, dma_addr_t dma_addr);
+
 /* PCI device grouping function */
 extern struct iommu_group *pci_device_group(struct device *dev);
 /* Generic device grouping function */

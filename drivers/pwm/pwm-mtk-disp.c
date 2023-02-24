@@ -25,15 +25,15 @@
 #define DISP_PWM_EN		0x00
 #define PWM_ENABLE_MASK		BIT(0)
 
-#define DISP_PWM_COMMIT		0x08
+#define DISP_PWM_COMMIT		0x0C
 #define PWM_COMMIT_MASK		BIT(0)
 
-#define DISP_PWM_CON_0		0x10
+#define DISP_PWM_CON_0		0x18
 #define PWM_CLKDIV_SHIFT	16
 #define PWM_CLKDIV_MAX		0x3ff
 #define PWM_CLKDIV_MASK		(PWM_CLKDIV_MAX << PWM_CLKDIV_SHIFT)
 
-#define DISP_PWM_CON_1		0x14
+#define DISP_PWM_CON_1		0x1C
 #define PWM_PERIOD_BIT_WIDTH	12
 #define PWM_PERIOD_MASK		((1 << PWM_PERIOD_BIT_WIDTH) - 1)
 
@@ -44,6 +44,7 @@ struct mtk_disp_pwm {
 	struct pwm_chip chip;
 	struct clk *clk_main;
 	struct clk *clk_mm;
+	struct clk *clk_pericfg;
 	void __iomem *base;
 };
 
@@ -106,6 +107,13 @@ static int mtk_disp_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 		return err;
 	}
 
+	err = clk_enable(mdp->clk_pericfg);
+	if (err < 0) {
+		clk_disable(mdp->clk_mm);
+		clk_disable(mdp->clk_main);
+		return err;
+	}
+
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_CON_0, PWM_CLKDIV_MASK,
 				 clk_div << PWM_CLKDIV_SHIFT);
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_CON_1,
@@ -115,6 +123,7 @@ static int mtk_disp_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	clk_disable(mdp->clk_mm);
 	clk_disable(mdp->clk_main);
+	clk_disable(mdp->clk_pericfg);
 
 	return 0;
 }
@@ -123,6 +132,10 @@ static int mtk_disp_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
 {
 	struct mtk_disp_pwm *mdp = to_mtk_disp_pwm(chip);
 	int err;
+
+	err = clk_prepare(mdp->clk_pericfg);
+	if (err < 0)
+		goto disable_clk_pericfg;
 
 	err = clk_enable(mdp->clk_main);
 	if (err < 0)
@@ -134,9 +147,19 @@ static int mtk_disp_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
 		return err;
 	}
 
+	err = clk_enable(mdp->clk_pericfg);
+	if (err < 0) {
+		clk_disable(mdp->clk_main);
+		clk_disable(mdp->clk_mm);
+		return err;
+	}
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_EN, PWM_ENABLE_MASK, 1);
 
 	return 0;
+
+disable_clk_pericfg:
+	clk_unprepare(mdp->clk_pericfg);
+	return err;
 }
 
 static void mtk_disp_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
@@ -144,9 +167,10 @@ static void mtk_disp_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
 	struct mtk_disp_pwm *mdp = to_mtk_disp_pwm(chip);
 
 	mtk_disp_pwm_update_bits(mdp, DISP_PWM_EN, PWM_ENABLE_MASK, 0);
-
 	clk_disable(mdp->clk_mm);
 	clk_disable(mdp->clk_main);
+	clk_disable(mdp->clk_pericfg);
+	clk_unprepare(mdp->clk_pericfg);
 }
 
 static const struct pwm_ops mtk_disp_pwm_ops = {
@@ -175,9 +199,13 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 	if (IS_ERR(mdp->clk_main))
 		return PTR_ERR(mdp->clk_main);
 
-	mdp->clk_mm = devm_clk_get(&pdev->dev, "mm");
+	mdp->clk_mm = devm_clk_get(&pdev->dev, "pwm-clk");
 	if (IS_ERR(mdp->clk_mm))
 		return PTR_ERR(mdp->clk_mm);
+
+	mdp->clk_pericfg = devm_clk_get(&pdev->dev, "pwm-pericfg-clk");
+	if (IS_ERR(mdp->clk_pericfg))
+		return PTR_ERR(mdp->clk_pericfg);
 
 	ret = clk_prepare(mdp->clk_main);
 	if (ret < 0)
@@ -186,6 +214,10 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 	ret = clk_prepare(mdp->clk_mm);
 	if (ret < 0)
 		goto disable_clk_main;
+
+	ret = clk_prepare(mdp->clk_pericfg);
+	if (ret < 0)
+		goto disable_clk_pericfg;
 
 	mdp->chip.dev = &pdev->dev;
 	mdp->chip.ops = &mtk_disp_pwm_ops;
@@ -202,6 +234,8 @@ static int mtk_disp_pwm_probe(struct platform_device *pdev)
 
 	return 0;
 
+disable_clk_pericfg:
+	clk_unprepare(mdp->clk_pericfg);
 disable_clk_mm:
 	clk_unprepare(mdp->clk_mm);
 disable_clk_main:
@@ -217,13 +251,12 @@ static int mtk_disp_pwm_remove(struct platform_device *pdev)
 	ret = pwmchip_remove(&mdp->chip);
 	clk_unprepare(mdp->clk_mm);
 	clk_unprepare(mdp->clk_main);
-
+	clk_unprepare(mdp->clk_pericfg);
 	return ret;
 }
 
 static const struct of_device_id mtk_disp_pwm_of_match[] = {
-	{ .compatible = "mediatek,mt8173-disp-pwm" },
-	{ .compatible = "mediatek,mt6595-disp-pwm" },
+	{ .compatible = "mediatek,mt3612-disp-pwm" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, mtk_disp_pwm_of_match);

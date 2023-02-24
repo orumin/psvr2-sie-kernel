@@ -421,8 +421,6 @@ rename:
 
 	dev->iommu_group = group;
 
-	iommu_group_create_direct_mappings(group, dev);
-
 	mutex_lock(&group->mutex);
 	list_add_tail(&device->list, &group->devices);
 	if (group->domain)
@@ -430,6 +428,8 @@ rename:
 	mutex_unlock(&group->mutex);
 	if (ret)
 		goto err_put_group;
+
+	iommu_group_create_direct_mappings(group, dev);
 
 	/* Notify any listeners about change to group. */
 	blocking_notifier_call_chain(&group->notifier,
@@ -1326,6 +1326,7 @@ int iommu_map(struct iommu_domain *domain, unsigned long iova,
 	unsigned long orig_iova = iova;
 	unsigned int min_pagesz;
 	size_t orig_size = size;
+	phys_addr_t orig_paddr = paddr;
 	int ret = 0;
 
 	if (unlikely(domain->ops->map == NULL ||
@@ -1370,7 +1371,7 @@ int iommu_map(struct iommu_domain *domain, unsigned long iova,
 	if (ret)
 		iommu_unmap(domain, orig_iova, orig_size - size);
 	else
-		trace_map(orig_iova, paddr, orig_size);
+		trace_map(orig_iova, orig_paddr, orig_size);
 
 	return ret;
 }

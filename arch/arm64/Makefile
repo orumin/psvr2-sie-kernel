@@ -30,6 +30,9 @@ KBUILD_CFLAGS	+= -mgeneral-regs-only $(lseinstr)
 KBUILD_CFLAGS	+= $(call cc-option, -mpc-relative-literal-loads)
 KBUILD_AFLAGS	+= $(lseinstr)
 
+MCPU_OPT-$(CONFIG_MACH_MT3612)   = $(call cc-option,-mcpu=cortex-a35,)
+KBUILD_CFLAGS	+= $(MCPU_OPT-y)
+
 ifeq ($(CONFIG_CPU_BIG_ENDIAN), y)
 KBUILD_CPPFLAGS	+= -mbig-endian
 AS		+= -EB

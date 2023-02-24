@@ -20,7 +20,11 @@
 #define MT8173_TOP_AXI_PROT_EN_MFG_M1		BIT(22)
 #define MT8173_TOP_AXI_PROT_EN_MFG_SNOOP_OUT	BIT(23)
 
-int mtk_infracfg_set_bus_protection(struct regmap *infracfg, u32 mask);
-int mtk_infracfg_clear_bus_protection(struct regmap *infracfg, u32 mask);
+int mtk_infracfg_set_bus_protection(struct regmap *infracfg, u32 prot,
+				   u32 protsta, u32 mask);
+int mtk_infracfg_clear_bus_protection(struct regmap *infracfg, u32 prot,
+				     u32 protsta, u32 mask);
+int mtk_infracfg_set_topaxi_si0(struct regmap *infracfg, u32 ctlreg,
+					u32 mask, u32 val);
 
 #endif /* __SOC_MEDIATEK_INFRACFG_H */

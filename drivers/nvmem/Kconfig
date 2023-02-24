@@ -14,6 +14,10 @@ menuconfig NVMEM
 
 if NVMEM
 
+config NVMEM_SUPPORT_USERLAND
+	bool "userland support of NVMEM"
+	default y
+
 config NVMEM_IMX_OCOTP
 	tristate "i.MX6 On-Chip OTP Controller support"
 	depends on SOC_IMX6
@@ -77,5 +81,17 @@ config NVMEM_VF610_OCOTP
 
 	  This driver can also be build as a module. If so, the module will
 	  be called nvmem-vf610-ocotp.
+
+config MTK_EFUSE
+	tristate "Mediatek SoCs EFUSE support"
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	depends on HAS_IOMEM
+	select REGMAP_MMIO
+	help
+	  This is a driver to access hardware related data like sensor
+	  calibration, HDMI impedance etc.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called efuse-mtk.
 
 endif

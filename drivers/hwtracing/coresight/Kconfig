@@ -77,4 +77,10 @@ config CORESIGHT_QCOM_REPLICATOR
 	  programmable ATB replicator sends the ATB trace stream from the
 	  ETB/ETF to the TPIUi and ETR.
 
+config CORESIGHT_MTK_DBGSYS
+	bool "Mediatek dbgsys driver"
+	help
+	  This enables support for Mediatek dbgsys.
+	  This driver enable ATB clock in dbgsys for CoreSight components.
+
 endif

@@ -132,6 +132,8 @@ __drm_atomic_helper_connector_destroy_state(struct drm_connector *connector,
 					    struct drm_connector_state *state);
 void drm_atomic_helper_connector_destroy_state(struct drm_connector *connector,
 					  struct drm_connector_state *state);
+struct drm_encoder *
+drm_atomic_helper_best_encoder(struct drm_connector *connector);
 
 /**
  * drm_atomic_crtc_for_each_plane - iterate over planes currently attached to CRTC

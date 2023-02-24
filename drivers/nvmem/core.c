@@ -58,6 +58,7 @@ static DEFINE_MUTEX(nvmem_cells_mutex);
 
 #define to_nvmem_device(d) container_of(d, struct nvmem_device, dev)
 
+#if IS_ENABLED(CONFIG_NVMEM_SUPPORT_USERLAND)
 static ssize_t bin_attr_nvmem_read(struct file *filp, struct kobject *kobj,
 				    struct bin_attribute *attr,
 				    char *buf, loff_t pos, size_t count)
@@ -107,6 +108,7 @@ static ssize_t bin_attr_nvmem_write(struct file *filp, struct kobject *kobj,
 
 	return count;
 }
+#endif
 
 /* default read/write permissions */
 static struct bin_attribute bin_attr_rw_nvmem = {
@@ -114,8 +116,10 @@ static struct bin_attribute bin_attr_rw_nvmem = {
 		.name	= "nvmem",
 		.mode	= S_IWUSR | S_IRUGO,
 	},
+#if IS_ENABLED(CONFIG_NVMEM_SUPPORT_USERLAND)
 	.read	= bin_attr_nvmem_read,
 	.write	= bin_attr_nvmem_write,
+#endif
 };
 
 static struct bin_attribute *nvmem_bin_rw_attributes[] = {
@@ -138,7 +142,9 @@ static struct bin_attribute bin_attr_ro_nvmem = {
 		.name	= "nvmem",
 		.mode	= S_IRUGO,
 	},
+#if IS_ENABLED(CONFIG_NVMEM_SUPPORT_USERLAND)
 	.read	= bin_attr_nvmem_read,
+#endif
 };
 
 static struct bin_attribute *nvmem_bin_ro_attributes[] = {

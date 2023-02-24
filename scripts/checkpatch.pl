@@ -27,7 +27,9 @@ my $emacs = 0;
 my $terse = 0;
 my $showfile = 0;
 my $file = 0;
-my $check = 0;
+my $git = 0;
+my %git_commits = ();
+my $check = 1;
 my $check_orig = 0;
 my $summary = 1;
 my $mailback = 0;
@@ -42,6 +44,7 @@ my %use_type = ();
 my @use = ();
 my %ignore_type = ();
 my @ignore = ();
+my @ignore_file = ();
 my $help = 0;
 my $configuration_file = ".checkpatch.conf";
 my $max_line_length = 80;
@@ -68,6 +71,16 @@ Options:
   --emacs                    emacs compile window format
   --terse                    one line per report
   --showfile                 emit diffed file position, not input file position
+  -g, --git                  treat FILE as a single commit or git revision range
+                             single git commit with:
+                               <rev>
+                               <rev>^
+                               <rev>~n
+                             multiple git commits with:
+                               <rev1>..<rev2>
+                               <rev1>...<rev2>
+                               <rev>-<count>
+                             git merges are ignored
   -f, --file                 treat FILE as regular source file
   --subjective, --strict     enable more subjective tests
   --types TYPE(,TYPE2...)    show only these comma separated message types
@@ -141,9 +154,11 @@ GetOptions(
 	'terse!'	=> \$terse,
 	'showfile!'	=> \$showfile,
 	'f|file!'	=> \$file,
+	'g|git!'	=> \$git,
 	'subjective!'	=> \$check,
 	'strict!'	=> \$check,
 	'ignore=s'	=> \@ignore,
+	'ignore_file=s'	=> \@ignore_file,
 	'types=s'	=> \@use,
 	'show-types!'	=> \$show_types,
 	'max-line-length=i' => \$max_line_length,
@@ -376,7 +391,7 @@ our $logFunctions = qr{(?x:
 	printk(?:_ratelimited|_once|)|
 	(?:[a-z0-9]+_){1,2}(?:printk|emerg|alert|crit|err|warning|warn|notice|info|debug|dbg|vdbg|devel|cont|WARN)(?:_ratelimited|_once|)|
 	WARN(?:_RATELIMIT|_ONCE|)|
-	panic|
+	panic|printf|
 	MODULE_[A-Z_]+|
 	seq_vprintf|seq_printf|seq_puts
 )};
@@ -729,10 +744,42 @@ my @fixed_inserted = ();
 my @fixed_deleted = ();
 my $fixlinenr = -1;
 
+# If input is git commits, extract all commits from the commit expressions.
+# For example, HEAD-3 means we need check 'HEAD, HEAD~1, HEAD~2'.
+die "$P: No git repository found\n" if ($git && !-e ".git");
+
+if ($git) {
+	my @commits = ();
+	foreach my $commit_expr (@ARGV) {
+		my $git_range;
+		if ($commit_expr =~ m/^(.*)-(\d+)$/) {
+			$git_range = "-$2 $1";
+		} elsif ($commit_expr =~ m/\.\./) {
+			$git_range = "$commit_expr";
+		} else {
+			$git_range = "-1 $commit_expr";
+		}
+		my $lines = `git log --no-color --no-merges --pretty=format:'%H %s' $git_range`;
+		foreach my $line (split(/\n/, $lines)) {
+			$line =~ /^([0-9a-fA-F]{40,40}) (.*)$/;
+			next if (!defined($1) || !defined($2));
+			my $sha1 = $1;
+			my $subject = $2;
+			unshift(@commits, $sha1);
+			$git_commits{$sha1} = $subject;
+		}
+	}
+	die "$P: no git commits after extraction!\n" if (@commits == 0);
+	@ARGV = @commits;
+}
+
 my $vname;
 for my $filename (@ARGV) {
 	my $FILE;
-	if ($file) {
+	if ($git) {
+		open($FILE, '-|', "git format-patch -M --stdout -1 $filename") ||
+			die "$P: $filename: git format-patch failed - $!\n";
+	} elsif ($file) {
 		open($FILE, '-|', "diff -u /dev/null $filename") ||
 			die "$P: $filename: diff failed - $!\n";
 	} elsif ($filename eq '-') {
@@ -743,6 +790,8 @@ for my $filename (@ARGV) {
 	}
 	if ($filename eq '-') {
 		$vname = 'Your patch';
+	} elsif ($git) {
+		$vname = "Commit " . substr($filename, 0, 12) . ' ("' . $git_commits{$filename} . '")';
 	} else {
 		$vname = $filename;
 	}
@@ -2085,6 +2134,7 @@ sub process {
 	$realcnt = 0;
 	$linenr = 0;
 	$fixlinenr = -1;
+	my $ignored = 0;
 	foreach my $line (@lines) {
 		$linenr++;
 		$fixlinenr++;
@@ -2177,11 +2227,23 @@ sub process {
 		}
 
 		if ($found_file) {
+			$ignored = 0;
+			foreach my $f (@ignore_file) {
+				if ($realfile =~ /\Q$f/) {
+					print "$realfile: ignored\n";
+					$ignored = 1;
+					last;
+				}
+			}
 			if ($realfile =~ m@^(?:drivers/net/|net/|drivers/staging/)@) {
 				$check = 1;
 			} else {
 				$check = $check_orig;
 			}
+			next;
+		}
+
+		if ($ignored) {
 			next;
 		}
 
@@ -2348,8 +2410,10 @@ sub process {
 
 # Check for git id commit length and improperly formed commit descriptions
 		if ($in_commit_log && !$commit_log_possible_stack_dump &&
+		    $line !~ /^\s*(?:Link|Patchwork|http|https|BugLink):/i &&
+		    $line !~ /^This reverts commit [0-9a-f]{7,40}/ &&
 		    ($line =~ /\bcommit\s+[0-9a-f]{5,}\b/i ||
-		     ($line =~ /\b[0-9a-f]{12,40}\b/i &&
+		     ($line =~ /(?:\s|^)[0-9a-f]{12,40}(?:[\s"'\(\[]|$)/i &&
 		      $line !~ /[\<\[][0-9a-f]{12,40}[\>\]]/i &&
 		      $line !~ /\bfixes:\s*[0-9a-f]{12,40}/i))) {
 			my $init_char = "c";

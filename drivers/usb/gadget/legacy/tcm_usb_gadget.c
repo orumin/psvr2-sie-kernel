@@ -2065,7 +2065,7 @@ static int usbg_bind(struct usb_configuration *c, struct usb_function *f)
 	uasp_fs_cmd_desc.bEndpointAddress = uasp_ss_cmd_desc.bEndpointAddress;
 
 	ret = usb_assign_descriptors(f, uasp_fs_function_desc,
-			uasp_hs_function_desc, uasp_ss_function_desc);
+			uasp_hs_function_desc, uasp_ss_function_desc, NULL);
 	if (ret)
 		goto ep_fail;
 

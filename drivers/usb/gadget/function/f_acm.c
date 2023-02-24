@@ -272,6 +272,43 @@ static struct usb_descriptor_header *acm_ss_function[] = {
 	(struct usb_descriptor_header *) &acm_ss_bulk_comp_desc,
 	NULL,
 };
+static struct usb_endpoint_descriptor acm_ssp_in_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_endpoint_descriptor acm_ssp_out_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor acm_ssp_bulk_comp_desc = {
+	.bLength =              sizeof(acm_ss_bulk_comp_desc),
+	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
+};
+
+
+
+static struct usb_descriptor_header *acm_ssp_function[] = {
+	(struct usb_descriptor_header *) &acm_iad_descriptor,
+	(struct usb_descriptor_header *) &acm_control_interface_desc,
+	(struct usb_descriptor_header *) &acm_header_desc,
+	(struct usb_descriptor_header *) &acm_call_mgmt_descriptor,
+	(struct usb_descriptor_header *) &acm_descriptor,
+	(struct usb_descriptor_header *) &acm_union_desc,
+	(struct usb_descriptor_header *) &acm_hs_notify_desc,
+	(struct usb_descriptor_header *) &acm_ssp_bulk_comp_desc,
+	(struct usb_descriptor_header *) &acm_data_interface_desc,
+	(struct usb_descriptor_header *) &acm_ssp_in_desc,
+	(struct usb_descriptor_header *) &acm_ssp_bulk_comp_desc,
+	(struct usb_descriptor_header *) &acm_ssp_out_desc,
+	(struct usb_descriptor_header *) &acm_ssp_bulk_comp_desc,
+	NULL,
+};
 
 /* string descriptors: */
 
@@ -686,8 +723,10 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 	acm_ss_in_desc.bEndpointAddress = acm_fs_in_desc.bEndpointAddress;
 	acm_ss_out_desc.bEndpointAddress = acm_fs_out_desc.bEndpointAddress;
 
+	acm_ssp_in_desc.bEndpointAddress = acm_fs_in_desc.bEndpointAddress;
+	acm_ssp_out_desc.bEndpointAddress = acm_fs_out_desc.bEndpointAddress;
 	status = usb_assign_descriptors(f, acm_fs_function, acm_hs_function,
-			acm_ss_function);
+			acm_ss_function, acm_ssp_function);
 	if (status)
 		goto fail;
 

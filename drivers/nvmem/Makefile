@@ -18,3 +18,5 @@ obj-$(CONFIG_NVMEM_SUNXI_SID)	+= nvmem_sunxi_sid.o
 nvmem_sunxi_sid-y		:= sunxi_sid.o
 obj-$(CONFIG_NVMEM_VF610_OCOTP)	+= nvmem-vf610-ocotp.o
 nvmem-vf610-ocotp-y		:= vf610-ocotp.o
+obj-$(CONFIG_MTK_EFUSE)		+= nvmem_mtk-efuse.o
+nvmem_mtk-efuse-y		:= mtk-efuse.o

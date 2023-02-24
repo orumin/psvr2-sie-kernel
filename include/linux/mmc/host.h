@@ -20,6 +20,7 @@
 #include <linux/mmc/core.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/pm.h>
+#include <linux/dma-direction.h>
 
 struct mmc_ios {
 	unsigned int	clock;			/* clock rate */
@@ -152,11 +153,26 @@ struct device;
 struct mmc_async_req {
 	/* active mmc request */
 	struct mmc_request	*mrq;
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	struct mmc_request	*mrq_que;
+	bool cmdq_en;
+#endif
 	/*
 	 * Check error status of completed mmc request.
 	 * Returns 0 if success otherwise non zero.
 	 */
-	int (*err_check) (struct mmc_card *, struct mmc_async_req *);
+	int (*err_check)(struct mmc_card *, struct mmc_async_req *);
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+#define MMC_QUEUE_BEFORE_ENQ	(0)
+#define MMC_QUEUE_ENQ		(1)
+#define MMC_QUEUE_BEFORE_QRDY	(2)
+#define MMC_QUEUE_BEFORE_TRAN	(3)
+#define MMC_QUEUE_TRAN		(4)
+#define MMC_QUEUE_BUSY		(5)
+#define MMC_QUEUE_BEFORE_POST	(7)
+	unsigned long		state;
+	unsigned int		prio;
+#endif
 };
 
 /**
@@ -190,6 +206,11 @@ struct mmc_context_info {
 	wait_queue_head_t	wait;
 	spinlock_t		lock;
 };
+
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+#define EMMC_MAX_QUEUE_DEPTH		(32)
+#define EMMC_MIN_RT_CLASS_TAG_COUNT	(4)
+#endif
 
 struct regulator;
 struct mmc_pwrseq;
@@ -289,7 +310,14 @@ struct mmc_host {
 #define MMC_CAP2_HSX00_1_2V	(MMC_CAP2_HS200_1_2V_SDR | MMC_CAP2_HS400_1_2V)
 #define MMC_CAP2_SDIO_IRQ_NOTHREAD (1 << 17)
 #define MMC_CAP2_NO_WRITE_PROTECT (1 << 18)	/* No physical write protect pin, assume that card is always read-write */
-
+/* Do not send SDIO commands during initialization */
+#define MMC_CAP2_NO_SDIO	(1 << 19)
+/* Host supports enhanced strobe */
+#define MMC_CAP2_HS400_ES	(1 << 20)
+/* Do not send SD commands during initialization */
+#define MMC_CAP2_NO_SD		(1 << 21)
+/* Do not send (e)MMC commands during initialization */
+#define MMC_CAP2_NO_MMC		(1 << 22)
 	mmc_pm_flag_t		pm_caps;	/* supported pm features */
 
 	/* host specific block data */
@@ -359,6 +387,50 @@ struct mmc_host {
 	struct mmc_async_req	*areq;		/* active async req */
 	struct mmc_context_info	context_info;	/* async synchronization info */
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	struct mmc_async_req	*areq_que[EMMC_MAX_QUEUE_DEPTH];
+	struct mmc_async_req	*areq_cur;
+	atomic_t		areq_cnt;
+
+	spinlock_t		cmd_que_lock;
+	spinlock_t		dat_que_lock;
+	spinlock_t		que_lock;
+	struct list_head	cmd_que;
+	struct list_head	dat_que;
+
+	unsigned long		state;
+	wait_queue_head_t	cmp_que;
+	struct mmc_request	*done_mrq;
+	struct mmc_command	chk_cmd;
+	struct mmc_request	chk_mrq;
+	struct mmc_command	que_cmd;
+	struct mmc_request	que_mrq;
+	struct mmc_command	deq_cmd;
+	struct mmc_request	deq_mrq;
+
+	struct mmc_queue_req	*mqrq_cur;
+	struct mmc_queue_req	*mqrq_prev;
+	struct mmc_request	*prev_mrq;
+
+	struct task_struct	*cmdq_thread;
+	atomic_t		cq_rw;
+	atomic_t		cq_w;
+	unsigned int		wp_error;
+	atomic_t		cq_wait_rdy;
+	atomic_t		cq_rdy_cnt;
+	unsigned long		task_id_index;
+	int			cur_rw_task;
+
+	int			is_data_dma;
+	atomic_t		cq_tuning_now;
+#ifdef CONFIG_MMC_FFU
+	atomic_t		stop_queue;
+#endif
+	unsigned int		data_mrq_queued[32];
+	unsigned int		cmdq_support_changed;
+	int			align_size;
+#endif
+
 #ifdef CONFIG_FAIL_MMC_REQUEST
 	struct fault_attr	fail_mmc_request;
 #endif
@@ -395,6 +467,12 @@ int mmc_power_restore_host(struct mmc_host *host);
 
 void mmc_detect_change(struct mmc_host *, unsigned long delay);
 void mmc_request_done(struct mmc_host *, struct mmc_request *);
+
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+void mmc_handle_queued_request(struct mmc_host *host);
+int mmc_blk_end_queued_req(struct mmc_host *host,
+			   struct mmc_async_req *areq, int index, int status);
+#endif
 
 static inline void mmc_signal_sdio_irq(struct mmc_host *host)
 {
@@ -513,6 +591,11 @@ static inline void mmc_retune_recheck(struct mmc_host *host)
 {
 	if (host->hold_retune <= 1)
 		host->retune_now = 1;
+}
+
+static inline enum dma_data_direction mmc_get_dma_dir(struct mmc_data *data)
+{
+	return data->flags & MMC_DATA_WRITE ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 }
 
 #endif /* LINUX_MMC_HOST_H */

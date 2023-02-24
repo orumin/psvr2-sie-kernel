@@ -202,4 +202,13 @@ int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
  */
 struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd);
 
+/**
+ * ion_check_dma_buf() - check if an dma-buf is given from ion
+ * @dmabuf:	the dma-buf
+ *
+ * If a dma-buf from another exporter is passed in this function will return
+ * ERR_PTR(-EINVAL)
+ */
+int ion_check_dma_buf(struct dma_buf *dmabuf);
+
 #endif /* _LINUX_ION_H */

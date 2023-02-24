@@ -117,6 +117,12 @@ int config_ep_by_speed(struct usb_gadget *g,
 
 	/* select desired speed */
 	switch (g->speed) {
+	case USB_SPEED_SUPER_PLUS:
+		if (gadget_is_superspeed_plus(g)) {
+			speed_desc = f->ssp_descriptors;
+			want_comp_desc = 1;
+			break;
+		}
 	case USB_SPEED_SUPER:
 		if (gadget_is_superspeed(g)) {
 			speed_desc = f->ss_descriptors;
@@ -245,6 +251,8 @@ int usb_add_function(struct usb_configuration *config,
 		config->highspeed = true;
 	if (!config->superspeed && function->ss_descriptors)
 		config->superspeed = true;
+	if (!config->superspeed_plus && function->ssp_descriptors)
+		config->superspeed_plus = true;
 
 done:
 	if (value)
@@ -384,6 +392,7 @@ static u8 encode_bMaxPower(enum usb_device_speed speed,
 		return 0;
 	switch (speed) {
 	case USB_SPEED_SUPER:
+	case USB_SPEED_SUPER_PLUS:
 		return DIV_ROUND_UP(val, 8);
 	default:
 		return DIV_ROUND_UP(val, 2);
@@ -426,6 +435,9 @@ static int config_buf(struct usb_configuration *config,
 		struct usb_descriptor_header **descriptors;
 
 		switch (speed) {
+		case USB_SPEED_SUPER_PLUS:
+			descriptors = f->ssp_descriptors;
+			break;
 		case USB_SPEED_SUPER:
 			descriptors = f->ss_descriptors;
 			break;
@@ -459,7 +471,7 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 	u8				type = w_value >> 8;
 	enum usb_device_speed		speed = USB_SPEED_UNKNOWN;
 
-	if (gadget->speed == USB_SPEED_SUPER)
+	if (gadget->speed >= USB_SPEED_SUPER)
 		speed = gadget->speed;
 	else if (gadget_is_dualspeed(gadget)) {
 		int	hs = 0;
@@ -490,6 +502,10 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 check_config:
 		/* ignore configs that won't work at this speed */
 		switch (speed) {
+		case USB_SPEED_SUPER_PLUS:
+			if (!c->superspeed_plus)
+				continue;
+			break;
 		case USB_SPEED_SUPER:
 			if (!c->superspeed)
 				continue;
@@ -517,18 +533,24 @@ static int count_configs(struct usb_composite_dev *cdev, unsigned type)
 	unsigned			count = 0;
 	int				hs = 0;
 	int				ss = 0;
+	int				ssp = 0;
 
 	if (gadget_is_dualspeed(gadget)) {
 		if (gadget->speed == USB_SPEED_HIGH)
 			hs = 1;
 		if (gadget->speed == USB_SPEED_SUPER)
 			ss = 1;
+		if (gadget->speed == USB_SPEED_SUPER_PLUS)
+			ssp = 1;
 		if (type == USB_DT_DEVICE_QUALIFIER)
 			hs = !hs;
 	}
 	list_for_each_entry(c, &cdev->configs, list) {
 		/* ignore configs that won't work at this speed */
-		if (ss) {
+		if (ssp) {
+			if (!c->superspeed_plus)
+				continue;
+		} else if (ss) {
 			if (!c->superspeed)
 				continue;
 		} else if (hs) {
@@ -590,7 +612,9 @@ static int bos_desc(struct usb_composite_dev *cdev)
 	ss_cap->bmAttributes = 0; /* LTM is not supported yet */
 	ss_cap->wSpeedSupported = cpu_to_le16(USB_LOW_SPEED_OPERATION |
 				USB_FULL_SPEED_OPERATION |
+#ifndef CONFIG_USB_MTU3_USB2_FS
 				USB_HIGH_SPEED_OPERATION |
+#endif
 				USB_5GBPS_OPERATION);
 	ss_cap->bFunctionalitySupport = USB_LOW_SPEED_OPERATION;
 
@@ -605,6 +629,51 @@ static int bos_desc(struct usb_composite_dev *cdev)
 	ss_cap->bU1devExitLat = dcd_config_params.bU1devExitLat;
 	ss_cap->bU2DevExitLat = dcd_config_params.bU2DevExitLat;
 
+	/* The SuperSpeedPlus USB Device Capability descriptor */
+	if (gadget_is_superspeed_plus(cdev->gadget)) {
+		struct usb_ssp_cap_descriptor *ssp_cap;
+
+		ssp_cap = cdev->req->buf + le16_to_cpu(bos->wTotalLength);
+		bos->bNumDeviceCaps++;
+
+		/*
+		 * Report typical values.
+		 */
+
+		le16_add_cpu(&bos->wTotalLength, USB_DT_USB_SSP_CAP_SIZE(1));
+		ssp_cap->bLength = USB_DT_USB_SSP_CAP_SIZE(1);
+		ssp_cap->bDescriptorType = USB_DT_DEVICE_CAPABILITY;
+		ssp_cap->bDevCapabilityType = USB_SSP_CAP_TYPE;
+		ssp_cap->bReserved = 0;
+		ssp_cap->wReserved = 0;
+
+		/* SSAC = 1 (2 attributes) */
+		ssp_cap->bmAttributes = cpu_to_le32(1);
+
+		/* Min RX/TX Lane Count = 1 */
+		ssp_cap->wFunctionalitySupport =
+			cpu_to_le16((1 << 8) | (1 << 12));
+
+		/*
+		 * bmSublinkSpeedAttr[0]:
+		 *   ST  = Symmetric, RX
+		 *   LSE =  3 (Gbps)
+		 *   LP  =  1 (SuperSpeedPlus)
+		 *   LSM = 10 (10 Gbps)
+		 */
+		ssp_cap->bmSublinkSpeedAttr[0] =
+			cpu_to_le32((3 << 4) | (1 << 14) | (0xa << 16));
+		/*
+		 * bmSublinkSpeedAttr[1] =
+		 *   ST  = Symmetric, TX
+		 *   LSE =  3 (Gbps)
+		 *   LP  =  1 (SuperSpeedPlus)
+		 *   LSM = 10 (10 Gbps)
+		 */
+		ssp_cap->bmSublinkSpeedAttr[1] =
+			cpu_to_le32((3 << 4) | (1 << 14) |
+				    (0xa << 16) | (1 << 7));
+	}
 	return le16_to_cpu(bos->wTotalLength);
 }
 
@@ -699,6 +768,9 @@ static int set_config(struct usb_composite_dev *cdev,
 		 * configuration's setup callback.
 		 */
 		switch (gadget->speed) {
+		case USB_SPEED_SUPER_PLUS:
+			descriptors = f->ssp_descriptors;
+			break;
 		case USB_SPEED_SUPER:
 			descriptors = f->ss_descriptors;
 			break;
@@ -1505,7 +1577,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				cdev->gadget->ep0->maxpacket;
 			if (gadget_is_superspeed(gadget)) {
 				if (gadget->speed >= USB_SPEED_SUPER) {
-					cdev->desc.bcdUSB = cpu_to_le16(0x0300);
+					cdev->desc.bcdUSB = cpu_to_le16(0x0320);
 					cdev->desc.bMaxPacketSize0 = 9;
 				} else {
 					cdev->desc.bcdUSB = cpu_to_le16(0x0210);
@@ -1879,6 +1951,12 @@ void composite_disconnect(struct usb_gadget *gadget)
 {
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	unsigned long			flags;
+
+	if (cdev == NULL) {
+		WARN(1, "%s: Calling disconnect on a Gadget that is \
+			 not connected\n", __func__);
+		return;
+	}
 
 	/* REVISIT:  should we have config and device level
 	 * disconnect callbacks?
