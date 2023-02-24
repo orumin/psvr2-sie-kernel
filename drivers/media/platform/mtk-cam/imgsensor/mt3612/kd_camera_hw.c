@@ -338,7 +338,7 @@ int hwpoweronoff(struct mtk_camera *mtk_cam,
 	if (pwInfo->delay > 0) {
 #ifdef CONFIG_VIDEO_MEDIATEK_ISP_TINY
 		LOG_DBG("sleep:%d", pwInfo->delay);
-		msleep(pwInfo->delay);
+		usleep_range(pwInfo->delay * 1000, pwInfo->delay * 1000 + 100);
 #else
 		LOG_DBG("delay:%d", pwInfo->delay);
 		mdelay(pwInfo->delay);
